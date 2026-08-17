@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/api/login",     "destination": "/api/login" },
+    { "source": "/api/use_token", "destination": "/api/use_token" },
+    { "source": "/api/users",     "destination": "/api/users" },
+    { "source": "/api/setup",     "destination": "/api/setup" }
+  ]
+}
