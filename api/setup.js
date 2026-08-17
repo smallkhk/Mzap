@@ -24,6 +24,7 @@ module.exports = async function handler(req, res) {
         id         SERIAL PRIMARY KEY,
         token      TEXT UNIQUE NOT NULL,
         user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        uses_left  INTEGER DEFAULT 999,
         expires_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
