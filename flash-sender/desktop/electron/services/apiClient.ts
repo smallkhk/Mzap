@@ -76,7 +76,11 @@ async function request<T>(
     clearTimeout(timeout);
   }
 
-  if (response.status === 401 || response.status === 403) {
+  // 401 means the key itself was not accepted. A 403 is a *authenticated*
+  // refusal — most often a spending limit in custodial mode — and carries a
+  // message that explains exactly what is missing, so it must fall through to
+  // the generic handler below rather than being mislabelled as a bad key.
+  if (response.status === 401) {
     throw new AppError(
       'API_KEY_REJECTED',
       'The backend rejected this application\'s API key. It may have been revoked — ask your ' +
