@@ -78,11 +78,16 @@ async function main() {
   const client = await prisma.apiClient.findUnique({ where: { id: clientId } });
   if (!client) throw new Error(`No installation with id "${clientId}". Run with no arguments to list them.`);
 
-  const asset = await prisma.asset.findUnique({ where: { assetId } });
+  // Either the asset slug or its database row id: the dashboard shows one and
+  // phpMyAdmin the other, and the wrong column would write a limit that never
+  // matches a send.
+  const asset =
+    (await prisma.asset.findUnique({ where: { assetId } })) ??
+    (await prisma.asset.findUnique({ where: { id: assetId } }));
   if (!asset) throw new Error(`No asset with id "${assetId}". Run with no arguments to list them.`);
 
   if (has('revoke')) {
-    await prisma.spendingLimit.deleteMany({ where: { clientId, assetId } });
+    await prisma.spendingLimit.deleteMany({ where: { clientId, assetId: asset.assetId } });
     // eslint-disable-next-line no-console
     console.log(`\n✓ ${client.name} can no longer send ${asset.symbol}.\n`);
     return;
@@ -103,7 +108,7 @@ async function main() {
   }
 
   await prisma.spendingLimit.upsert({
-    where: { clientId_assetId: { clientId, assetId } },
+    where: { clientId_assetId: { clientId, assetId: asset.assetId } },
     update: {
       maxPerTxRaw: maxPerTxRaw.toString(),
       maxPerDayRaw: maxPerDayRaw.toString(),
@@ -111,7 +116,7 @@ async function main() {
     },
     create: {
       clientId,
-      assetId,
+      assetId: asset.assetId,
       maxPerTxRaw: maxPerTxRaw.toString(),
       maxPerDayRaw: maxPerDayRaw.toString(),
       enabled: true,

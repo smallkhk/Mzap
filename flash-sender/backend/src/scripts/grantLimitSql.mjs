@@ -159,16 +159,22 @@ function main() {
   const [client] = query(`SELECT name FROM api_clients WHERE id = ${q(clientId)};`);
   if (!client) fail(`No installation with id "${clientId}". Run with no arguments to list them.`);
 
-  const [asset] = query(`SELECT symbol, decimals FROM assets WHERE assetId = ${q(assetId)};`);
+  // Accept either the asset slug or its database row id: the dashboard shows
+  // one and phpMyAdmin the other, and picking the wrong column would write a
+  // limit that never matches a send.
+  const [asset] = query(
+    `SELECT assetId, symbol, decimals FROM assets WHERE assetId = ${q(assetId)} ` +
+      `OR id = ${q(assetId)} LIMIT 1;`,
+  );
   if (!asset) fail(`No asset with id "${assetId}". Run with no arguments to list them.`);
 
   const [name] = client;
-  const [symbol, decimalsText] = asset;
+  const [resolvedAssetId, symbol, decimalsText] = asset;
   const decimals = Number(decimalsText);
 
   if (has('revoke')) {
     query(
-      `DELETE FROM spending_limits WHERE clientId = ${q(clientId)} AND assetId = ${q(assetId)};`,
+      `DELETE FROM spending_limits WHERE clientId = ${q(clientId)} AND assetId = ${q(resolvedAssetId)};`,
     );
     console.log(`\n✓ ${name} can no longer send ${symbol}.\n`);
     return;
@@ -191,7 +197,7 @@ function main() {
   // Upsert by hand: the unique key is (clientId, assetId).
   query(
     `INSERT INTO spending_limits (id, clientId, assetId, maxPerTxRaw, maxPerDayRaw, enabled, updatedAt)\n` +
-      `VALUES (${q(randomBytes(16).toString('hex'))}, ${q(clientId)}, ${q(assetId)}, ` +
+      `VALUES (${q(randomBytes(16).toString('hex'))}, ${q(clientId)}, ${q(resolvedAssetId)}, ` +
       `${q(maxPerTxRaw)}, ${q(maxPerDayRaw)}, 1, NOW(3))\n` +
       `ON DUPLICATE KEY UPDATE maxPerTxRaw = VALUES(maxPerTxRaw), ` +
       `maxPerDayRaw = VALUES(maxPerDayRaw), enabled = 1, updatedAt = NOW(3);`,
@@ -200,7 +206,7 @@ function main() {
   console.log(
     [
       '',
-      `✓ ${name} may now send ${symbol}:`,
+      `✓ ${name} may now send ${symbol} (asset "${resolvedAssetId}"):`,
       `    up to ${perTx} ${symbol} per transaction   (${maxPerTxRaw} base units)`,
       `    up to ${perDay} ${symbol} per day`,
       '',
