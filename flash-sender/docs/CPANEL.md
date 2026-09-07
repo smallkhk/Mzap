@@ -76,9 +76,17 @@ In **Terminal**:
 
 ```bash
 cd ~/flash-sender-src/flash-sender/admin
-npm install
-npm run build
+
+# --production=false is required: cPanel's npm config forces production mode,
+# which omits devDependencies — and vite lives there.
+npm install --prefix "$PWD" --production=false
+npm run build --prefix "$PWD"
 ```
+
+`build` runs Vite only. Typechecking is a separate `npm run typecheck`, because
+Vite strips types with esbuild and never needs them — tying the two together
+would mean a host that declines to install devDependencies could not build at
+all.
 
 This produces `admin/dist/`, which the backend serves in step 8. Nothing needs
 to go into `public_html`.
