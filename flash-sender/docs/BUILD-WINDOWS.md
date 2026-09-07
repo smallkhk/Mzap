@@ -210,6 +210,8 @@ npm run package:win
 | Symptom | Cause and fix |
 |---|---|
 | `cannot execute cause=EACCES` during packaging | electron-builder's cache is corrupt. Delete `%LOCALAPPDATA%\electron-builder\Cache` and retry. |
+| `Cannot create symbolic link : A required privilege is not held by the client` | electron-builder's code-signing toolkit archive contains macOS symlinks, and creating symlinks on Windows needs a privilege standard accounts lack. The app itself has already built at this point — only the installer step fails. Fix once, either way: run the terminal **as Administrator**, or enable **Settings → Privacy & security → For developers → Developer Mode**. Then clear the partial extractions with `rmdir /s /q "%LOCALAPPDATA%\electron-builder\Cache\winCodeSign"` and re-run, or the broken copies get reused. |
+| Installer step fails but you need the app now | `release\win-unpacked\Flash Sender by Nora.exe` is the fully working application — packaging only wraps it in an installer. Run it directly to test. |
 | App launches to a blank window | The renderer bundle is missing. Run `npm run build` before packaging, and check `dist/index.html` exists. |
 | `Cannot find module 'ethers'` at runtime | Something changed the Vite externals. `ethers` must be **bundled** into `dist-electron/main.js`, not left external — only `electron` is external. |
 | SmartScreen warning on every install | The build is unsigned, or the certificate has no reputation yet. EV certificates get reputation immediately; OV ones accrue it over downloads. |
