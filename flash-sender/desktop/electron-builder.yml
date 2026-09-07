@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Windows packaging for Flash Sender by Nora.
+#
+# Produces: release/Flash-Sender-by-Nora-Setup-<version>.exe (NSIS installer)
+#           release/Flash-Sender-by-Nora-<version>-portable.exe (optional)
+#
+# Code signing: set the environment variables described in docs/BUILD-WINDOWS.md
+# before running. An unsigned build works, but Windows SmartScreen will warn
+# users on first run.
+# ---------------------------------------------------------------------------
+
+appId: com.nora.flashsender
+productName: Flash Sender by Nora
+copyright: Copyright © ${author}
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+
+# Everything is bundled by Vite, so no node_modules need shipping.
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: Flash-Sender-by-Nora-Setup-${version}.${ext}
+  # Declares no elevated privileges; the app writes only to %APPDATA%.
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Flash Sender by Nora
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  # The wallet vault lives in %APPDATA% and must survive an uninstall unless
+  # the user explicitly clears it — deleting it would destroy their key.
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+
+portable:
+  artifactName: Flash-Sender-by-Nora-${version}-portable.${ext}
+
+publish: null

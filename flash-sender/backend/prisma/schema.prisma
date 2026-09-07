@@ -1,0 +1,236 @@
+// Flash Sender by Nora — backend datastore.
+//
+// The backend is the source of truth for *configuration* (networks + assets)
+// and an append-mostly ledger of transaction records reported by desktop
+// clients. It deliberately stores no key material of any kind: there is no
+// column anywhere in this schema for a private key, mnemonic or wallet
+// password, and the API rejects any payload carrying one.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+enum AdminRole {
+  ADMIN
+  VIEWER
+}
+
+/// A human operator of the admin dashboard.
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(VIEWER)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  refreshTokens RefreshToken[]
+
+  @@map("admin_users")
+}
+
+/// Hashed refresh tokens. Rotated on every use; a replayed token revokes the
+/// whole family (reuse detection).
+model RefreshToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  familyId   String
+  userId     String
+  user       AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+/// A desktop installation. Identified by an API key presented as `X-API-Key`.
+/// Only the SHA-256 of the key is stored; the plaintext is shown once at
+/// creation time and never again.
+model ApiClient {
+  id         String    @id @default(cuid())
+  name       String
+  keyHash    String    @unique
+  keyPrefix  String
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  transactions TransactionRecord[]
+
+  @@map("api_clients")
+}
+
+// ---------------------------------------------------------------------------
+// Configuration — what the desktop app is allowed to send
+// ---------------------------------------------------------------------------
+
+/// A blockchain the application can talk to. `chainId` is authoritative: the
+/// desktop client re-checks it against the RPC endpoint's reported chain id
+/// before signing anything, so a misconfigured network fails closed.
+model Network {
+  id            String   @id @default(cuid())
+  key           String   @unique // stable slug, e.g. "bsc", "bsc-testnet"
+  name          String // "BNB Smart Chain"
+  chainId       Int      @unique
+  rpcUrls       String[] // tried in order; must be https:// or wss://
+  explorerUrl   String // base explorer URL, e.g. https://bscscan.com
+  nativeSymbol  String // "BNB"
+  nativeName    String // "BNB"
+  nativeDecimals Int     @default(18)
+  isTestnet     Boolean  @default(true)
+  enabled       Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  assets Asset[]
+
+  @@map("networks")
+}
+
+/// A sendable coin or token. Exactly one of (isNative) / (contractAddress)
+/// is meaningful: native assets carry no contract, token assets must carry a
+/// checksummed EVM address.
+model Asset {
+  id              String   @id @default(cuid())
+  /// Stable public identifier used by the desktop app, e.g. "usdt-bsc".
+  assetId         String   @unique
+  name            String // "Tether USD"
+  symbol          String // "USDT"
+  networkId       String
+  network         Network  @relation(fields: [networkId], references: [id], onDelete: Restrict)
+  /// Null for native assets. Stored EIP-55 checksummed.
+  contractAddress String?
+  decimals        Int
+  isNative        Boolean  @default(false)
+  /// Optional per-asset explorer override; falls back to the network's.
+  explorerUrl     String?
+  logoUrl         String?
+  enabled         Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([networkId, contractAddress])
+  @@index([enabled])
+  @@map("assets")
+}
+
+/// Single-row table holding the configuration version. Bumped by any mutation
+/// to `networks` or `assets` so clients can cheaply detect staleness via
+/// GET /api/config/version.
+model ConfigVersion {
+  id        Int      @id @default(1)
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+
+  @@map("config_version")
+}
+
+// ---------------------------------------------------------------------------
+// Transaction ledger
+// ---------------------------------------------------------------------------
+
+enum TxStatus {
+  PREPARING
+  AWAITING_CONFIRMATION
+  SIGNING
+  BROADCASTING
+  PENDING
+  CONFIRMED
+  FAILED
+  REJECTED
+}
+
+/// A record of a transaction the desktop app actually broadcast.
+///
+/// `txHash` is whatever the RPC node returned from eth_sendRawTransaction —
+/// the server never generates, derives or backfills it. A record may exist
+/// with a null hash only while it is in a pre-broadcast state.
+model TransactionRecord {
+  id       String @id @default(cuid())
+  /// Client-supplied idempotency key, unique per client. Prevents a retried
+  /// POST from creating a duplicate ledger row.
+  clientRef String
+
+  txHash   String?
+  chainId  Int
+  status   TxStatus @default(PREPARING)
+
+  assetId         String // Asset.assetId at time of send
+  symbol          String
+  decimals        Int
+  isNative        Boolean
+  contractAddress String?
+
+  fromAddress String
+  toAddress   String
+  /// Integer base-unit amount, as a decimal string (uint256 exceeds bigint).
+  amountRaw   String
+  /// Human-readable amount, for display only. Never used for arithmetic.
+  amountDisplay String
+
+  blockNumber       Int?
+  gasUsed           String?
+  effectiveGasPrice String?
+  /// gasUsed * effectiveGasPrice, in native base units, as a decimal string.
+  feeRaw            String?
+  nonce             Int?
+  confirmations     Int     @default(0)
+
+  errorCode    String?
+  errorMessage String?
+
+  submittedAt DateTime  @default(now())
+  broadcastAt DateTime?
+  confirmedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  clientId String?
+  client   ApiClient? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@unique([clientId, clientRef])
+  @@unique([txHash, chainId])
+  @@index([fromAddress])
+  @@index([status])
+  @@index([submittedAt])
+  @@map("transaction_records")
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+/// Append-only record of every configuration change and auth event.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String // "admin" | "client" | "system"
+  actorId    String?
+  actorLabel String?
+  action     String // "asset.create", "auth.login.failed", ...
+  entity     String?
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}

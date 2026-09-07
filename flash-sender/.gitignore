@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+*.tsbuildinfo
+
+# Environment — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Wallet vaults and local app data. These should never be anywhere near a
+# repository, but the ignore rule is here as a backstop.
+*.vault
+wallet.vault
+history.json
+config-cache.json
+
+# Code-signing material
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Logs and editor/OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
