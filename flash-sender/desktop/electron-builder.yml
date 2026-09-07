@@ -32,7 +32,10 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  icon: build/icon.ico
+  # Icons are optional. electron-builder picks up build/icon.ico automatically
+  # when it exists and falls back to the default Electron icon when it does
+  # not. Naming the path explicitly makes the file *required*, which fails the
+  # build for anyone who has not supplied artwork yet — see build/README.md.
   artifactName: Flash-Sender-by-Nora-Setup-${version}.${ext}
   # Declares no elevated privileges; the app writes only to %APPDATA%.
   requestedExecutionLevel: asInvoker
@@ -45,8 +48,6 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Flash Sender by Nora
-  installerIcon: build/icon.ico
-  uninstallerIcon: build/icon.ico
   # The wallet vault lives in %APPDATA% and must survive an uninstall unless
   # the user explicitly clears it — deleting it would destroy their key.
   deleteAppDataOnUninstall: false
