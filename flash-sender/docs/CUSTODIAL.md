@@ -106,6 +106,15 @@ an installation with nothing granted reads `nothing` and cannot send. Click
 per-day caps in human units, and save. The same panel edits a cap, pauses one
 without losing the amounts, or revokes the asset outright.
 
+**Or from a shell on the server**, which needs no login and no `jq`:
+
+```bash
+cd ~/send
+npm run grant-limit                       # lists installations and assets
+npm run grant-limit -- --client <id> --asset <id> --per-tx 100 --per-day 500
+npm run grant-limit -- --client <id> --asset <id> --revoke
+```
+
 **Or over the API**, which is what the dashboard calls:
 
 ```bash
