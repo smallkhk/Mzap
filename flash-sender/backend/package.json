@@ -24,7 +24,8 @@
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts",
     "postinstall": "prisma generate",
-    "prisma:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script"
+    "prisma:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "import-wallet": "tsx src/scripts/importWallet.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

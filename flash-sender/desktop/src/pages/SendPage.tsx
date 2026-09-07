@@ -21,6 +21,8 @@ interface BalanceState {
   address: string | null;
   asset: { raw: string; formatted: string; symbol: string; decimals: number } | null;
   native: { raw: string; formatted: string; symbol: string; decimals: number } | null;
+  /** Present in custodial mode: what this installation may still send. */
+  limit?: { maxPerTx: string; maxPerDay: string } | null;
 }
 
 export function SendPage({ config, configIssues, onRefreshConfig, onOpenHistory }: Props) {
@@ -249,6 +251,12 @@ export function SendPage({ config, configIssues, onRefreshConfig, onOpenHistory 
             value={balance?.native ? balance.native.formatted : '—'}
             mono
           />
+          {balance?.limit && (
+            <Row
+              label="Your sending limit"
+              value={`${balance.limit.maxPerTx} per transfer · ${balance.limit.maxPerDay} per day`}
+            />
+          )}
         </div>
 
         {chainError && <Alert tone="danger">{chainError}</Alert>}

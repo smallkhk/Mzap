@@ -13,6 +13,7 @@ import { authRouter } from './routes/auth.routes';
 import { configRouter } from './routes/config.routes';
 import { transactionsRouter } from './routes/transactions.routes';
 import { adminRouter } from './routes/admin.routes';
+import { sendRouter } from './routes/send.routes';
 import { getConfigVersion } from './services/configVersion';
 
 export function createApp() {
@@ -102,6 +103,7 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   app.use('/api', configRouter);
   app.use('/api', transactionsRouter);
+  app.use('/api', sendRouter);
   app.use('/api/admin', adminRouter);
 
   // Optionally serve the admin dashboard from this same process. Doing so

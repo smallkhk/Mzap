@@ -10,6 +10,57 @@ import * as transfer from './services/transferService';
 import * as chain from './services/blockchain';
 import * as api from './services/apiClient';
 import { formatAmount } from './lib/amount';
+import type { TransactionRecord } from '../shared/types';
+
+/**
+ * True when the backend signs on this installation's behalf.
+ *
+ * Every handler below branches on this rather than on a stored setting, so a
+ * deployment that switches modes is picked up on the next config sync without
+ * the app needing to be reinstalled.
+ */
+const isCustodial = () => configStore.getCached().config?.signingMode === 'custodial';
+
+/** Maps a server ledger row into the record shape the UI already renders. */
+function fromServerRecord(raw: any): TransactionRecord {
+  const asset = configStore.getAssets().find((a) => a.id === raw.assetId);
+  const network = asset?.network;
+
+  return {
+    id: String(raw.id),
+    clientRef: String(raw.clientRef ?? raw.id),
+    txHash: raw.txHash ?? null,
+    chainId: Number(raw.chainId),
+    networkName: network?.name ?? `Chain ${raw.chainId}`,
+    status: raw.status,
+    assetId: String(raw.assetId),
+    symbol: String(raw.symbol),
+    decimals: Number(raw.decimals),
+    isNative: Boolean(raw.isNative),
+    contractAddress: raw.contractAddress ?? null,
+    fromAddress: String(raw.fromAddress),
+    toAddress: String(raw.toAddress),
+    amountRaw: String(raw.amountRaw),
+    amountDisplay: String(raw.amountDisplay),
+    blockNumber: raw.blockNumber ?? null,
+    gasUsed: raw.gasUsed ?? null,
+    effectiveGasPrice: raw.effectiveGasPrice ?? null,
+    feeRaw: raw.feeRaw ?? null,
+    feeDisplay: raw.feeRaw
+      ? `${formatAmount(raw.feeRaw, network?.nativeDecimals ?? 18)} ${network?.nativeSymbol ?? ''}`.trim()
+      : null,
+    nativeSymbol: network?.nativeSymbol ?? '',
+    nativeDecimals: network?.nativeDecimals ?? 18,
+    nonce: raw.nonce ?? null,
+    confirmations: Number(raw.confirmations ?? 0),
+    errorCode: raw.errorCode ?? null,
+    errorMessage: raw.errorMessage ?? null,
+    submittedAt: String(raw.submittedAt),
+    broadcastAt: raw.broadcastAt ?? null,
+    confirmedAt: raw.confirmedAt ?? null,
+    explorerUrl: raw.explorerUrl ?? null,
+  };
+}
 
 /**
  * The complete IPC surface.
@@ -56,7 +107,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
   // Wallet
   // -------------------------------------------------------------------------
 
-  handle('wallet:status', () => wallet.getStatus());
+  handle('wallet:status', async () => {
+    // In custodial mode there is no local key, so the setup and unlock
+    // screens are bypassed by reporting a ready wallet at the shared address.
+    if (isCustodial()) {
+      const config = configStore.getCached().config;
+      return {
+        hasWallet: true,
+        unlocked: true,
+        address: config?.senderAddress ?? null,
+        osEncryptionAvailable: true,
+        autoLockSeconds: 0,
+        custodial: true,
+      };
+    }
+    return { ...(await wallet.getStatus()), custodial: false };
+  });
 
   handle('wallet:create', (passphrase: string) => wallet.createWallet(passphrase));
 
@@ -113,6 +179,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
 
   /** Balance of the selected asset, plus the native balance used for fees. */
   handle('chain:balance', async (assetId: string) => {
+    if (isCustodial()) {
+      // The server reads the shared wallet's balances; it also reports what
+      // this installation is still permitted to send.
+      const info = await api.fetchServerWallet(assetId);
+      return { address: info.address, asset: info.asset, native: info.native, limit: info.limit };
+    }
+
     const asset = configStore.requireAsset(assetId);
     const address = vault.currentAddress();
 
@@ -148,6 +221,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
 
   /** Step 1: validate + estimate. Returns what the confirmation screen shows. */
   handle('transfer:prepare', async (input: { assetId: string; recipient: string; amount: string }) => {
+    if (isCustodial()) return api.prepareServerSend(input);
+
     const asset = configStore.requireAsset(input.assetId);
     return transfer.prepareTransfer({
       asset,
@@ -157,7 +232,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
   });
 
   /** Step 2: the user confirmed. Sign and broadcast. */
-  handle('transfer:confirm', (clientRef: string) => transfer.executeTransfer(clientRef));
+  handle('transfer:confirm', async (clientRef: string) => {
+    if (!isCustodial()) return transfer.executeTransfer(clientRef);
+
+    // The server signs, broadcasts and watches for the receipt. It returns
+    // the node's hash — this client never generates one.
+    const result = await api.confirmServerSend(clientRef);
+    const records = await api.fetchServerTransactions();
+    const record = records.transactions.find((r) => (r as { id?: string }).id === result.id);
+
+    getWindow()?.webContents.send('transfer:progress', {
+      clientRef,
+      state: result.status,
+      txHash: result.txHash,
+      message: 'Broadcast. Waiting for the network to include it in a block…',
+    });
+
+    return record
+      ? fromServerRecord(record)
+      : fromServerRecord({ ...result, assetId: '', symbol: '', decimals: 18, amountRaw: '0', amountDisplay: '0', fromAddress: '', toAddress: '', chainId: 0, submittedAt: new Date().toISOString() });
+  });
 
   /** The user cancelled at the confirmation screen. Nothing was signed. */
   handle('transfer:reject', (clientRef: string) => transfer.rejectTransfer(clientRef));
@@ -171,7 +265,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
   // History
   // -------------------------------------------------------------------------
 
-  handle('history:list', () => history.listTransactions());
+  handle('history:list', async () => {
+    if (!isCustodial()) return history.listTransactions();
+
+    // The shared wallet's history lives on the server, so it is the same
+    // across every installation that uses this backend.
+    const body = await api.fetchServerTransactions();
+    return body.transactions.map(fromServerRecord);
+  });
 
   handle('history:get', (clientRef: string) => history.getTransaction(clientRef));
 

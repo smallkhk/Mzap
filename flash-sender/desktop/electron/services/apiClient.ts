@@ -1,4 +1,11 @@
-import type { AppConfig, AssetConfig, NetworkConfig, TxState } from '../../shared/types';
+import type {
+  AppConfig,
+  AssetConfig,
+  NetworkConfig,
+  SigningMode,
+  TransferQuote,
+  TxState,
+} from '../../shared/types';
 import { AppError } from '../lib/errors';
 import { getApiKey, getSettings } from './settings';
 
@@ -203,6 +210,8 @@ export async function fetchConfig(): Promise<{ config: AppConfig; rejected: stri
   const body = await request<{
     version: number;
     testnetOnly: boolean;
+    signingMode?: SigningMode;
+    senderAddress?: string | null;
     networks: unknown[];
     assets: unknown[];
   }>('/api/config');
@@ -231,6 +240,10 @@ export async function fetchConfig(): Promise<{ config: AppConfig; rejected: stri
     config: {
       version: body.version,
       testnetOnly: Boolean(body.testnetOnly),
+      // An older backend omits this; local signing is the safe assumption,
+      // since it never asks the server to hold a key.
+      signingMode: body.signingMode === 'custodial' ? 'custodial' : 'local',
+      senderAddress: body.senderAddress ?? null,
       networks,
       assets,
       fetchedAt: new Date().toISOString(),
@@ -282,6 +295,62 @@ export async function updateTransaction(id: string, input: UpdateTransactionInpu
     method: 'PATCH',
     body: JSON.stringify(input),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Custodial sending
+//
+// Used only when the backend reports signingMode "custodial". The same
+// two-phase shape as local signing: prepare returns a quote held server-side,
+// confirm broadcasts it by reference so the transaction signed is the one
+// that was displayed.
+// ---------------------------------------------------------------------------
+
+export interface ServerWalletInfo {
+  custodial: boolean;
+  address: string | null;
+  asset: { raw: string; formatted: string; symbol: string; decimals: number } | null;
+  native: { raw: string; formatted: string; symbol: string; decimals: number } | null;
+  limit: { maxPerTx: string; maxPerDay: string } | null;
+}
+
+export async function fetchServerWallet(assetId?: string): Promise<ServerWalletInfo> {
+  const query = assetId ? `?assetId=${encodeURIComponent(assetId)}` : '';
+  return request<ServerWalletInfo>(`/api/wallet${query}`);
+}
+
+export async function prepareServerSend(input: {
+  assetId: string;
+  recipient: string;
+  amount: string;
+}): Promise<TransferQuote> {
+  const quote = await request<Omit<TransferQuote, 'maxFeePerGas' | 'maxPriorityFeePerGas' | 'gasPrice'>>(
+    '/api/send/prepare',
+    { method: 'POST', body: JSON.stringify(input), timeoutMs: 45_000 },
+  );
+
+  // Fee parameters stay on the server with the stored quote; the client never
+  // needs them, and shipping them would only invite tampering.
+  return { ...quote, maxFeePerGas: null, maxPriorityFeePerGas: null, gasPrice: null };
+}
+
+export async function confirmServerSend(clientRef: string) {
+  return request<{
+    id: string;
+    clientRef: string;
+    txHash: string | null;
+    status: TxState;
+    explorerUrl: string | null;
+  }>('/api/send/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ clientRef }),
+    timeoutMs: 90_000,
+  });
+}
+
+/** The server-side ledger for this installation, used as history in custodial mode. */
+export async function fetchServerTransactions() {
+  return request<{ transactions: Record<string, unknown>[] }>('/api/transactions?limit=200');
 }
 
 /** Connectivity check used by the Settings screen. */

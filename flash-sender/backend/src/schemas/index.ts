@@ -264,3 +264,18 @@ export const transactionQuerySchema = z.object({
 export const createApiClientSchema = z.object({
   name: z.string().min(1).max(80),
 });
+
+// ---------------------------------------------------------------------------
+// Spending limits (custodial mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Limits are given in human units and converted using the asset's decimals,
+ * so an administrator types "500" rather than a 20-digit base-unit integer.
+ */
+export const setSpendingLimitSchema = z.object({
+  assetId: slugSchema,
+  maxPerTx: z.string().min(1).max(80),
+  maxPerDay: z.string().min(1).max(80),
+  enabled: z.boolean().default(true),
+});

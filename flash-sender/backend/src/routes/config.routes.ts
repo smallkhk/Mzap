@@ -6,6 +6,7 @@ import { validate } from '../middleware/validate';
 import { assetQuerySchema } from '../schemas';
 import { getConfigVersion } from '../services/configVersion';
 import { serializeAsset, serializeNetwork } from '../services/serialize';
+import * as serverWallet from '../services/serverWallet';
 
 export const configRouter = Router();
 
@@ -55,6 +56,10 @@ configRouter.get('/config', requireClient, async (_req, res, next) => {
     res.json({
       version,
       testnetOnly: config.TESTNET_ONLY,
+      // "custodial" means this server holds the sending key and signs for
+      // clients; the desktop app then skips its own wallet setup entirely.
+      signingMode: serverWallet.isCustodial() ? 'custodial' : 'local',
+      senderAddress: serverWallet.isCustodial() ? serverWallet.address() : null,
       networks: networks.map(serializeNetwork),
       assets: assets.map(serializeAsset),
       /// Advisory only — the client enforces its own confirmation policy too.

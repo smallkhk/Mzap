@@ -9,9 +9,12 @@ import {
   createApiClientSchema,
   createAssetSchema,
   createNetworkSchema,
+  setSpendingLimitSchema,
   updateAssetSchema,
   updateNetworkSchema,
 } from '../schemas';
+import { formatAmount, parseAmount } from '../lib/amount';
+import * as serverWallet from '../services/serverWallet';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { recordAudit } from '../services/audit';
 import { bumpConfigVersion, getConfigVersion } from '../services/configVersion';
@@ -478,6 +481,147 @@ adminRouter.post('/clients/:id/revoke', canWrite, writeLimiter, async (req, res,
       action: 'client.revoke',
       entity: 'ApiClient',
       entityId: client.id,
+      req,
+    });
+
+    return res.json({ revoked: true });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Custodial wallet + spending limits
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/admin/wallet
+ *
+ * Whether this deployment signs on behalf of clients, and from which address.
+ */
+adminRouter.get('/wallet', (_req, res) => {
+  res.json({
+    custodial: serverWallet.isCustodial(),
+    address: serverWallet.isCustodial() ? serverWallet.address() : null,
+  });
+});
+
+/** GET /api/admin/clients/:id/limits */
+adminRouter.get('/clients/:id/limits', async (req, res, next) => {
+  try {
+    const limits = await prisma.spendingLimit.findMany({
+      where: { clientId: req.params.id },
+      orderBy: { assetId: 'asc' },
+    });
+
+    // Limits are stored in base units; present them in human units alongside
+    // the asset so the dashboard never has to know about decimals.
+    const assets = await prisma.asset.findMany({
+      where: { assetId: { in: limits.map((l) => l.assetId) } },
+    });
+    const decimalsByAsset = new Map(assets.map((a) => [a.assetId, a.decimals]));
+
+    res.json({
+      limits: limits.map((limit) => {
+        const decimals = decimalsByAsset.get(limit.assetId) ?? 18;
+        return {
+          assetId: limit.assetId,
+          maxPerTx: formatAmount(limit.maxPerTxRaw, decimals),
+          maxPerDay: formatAmount(limit.maxPerDayRaw, decimals),
+          enabled: limit.enabled,
+        };
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/admin/clients/:id/limits
+ *
+ * Grants or updates one asset's cap for one installation. Because a client
+ * with no limit row cannot send an asset at all, this is also how sending
+ * access is granted in the first place.
+ */
+adminRouter.put(
+  '/clients/:id/limits',
+  canWrite,
+  writeLimiter,
+  validate(setSpendingLimitSchema),
+  async (req, res, next) => {
+    try {
+      const { assetId, maxPerTx, maxPerDay, enabled } = req.body as {
+        assetId: string;
+        maxPerTx: string;
+        maxPerDay: string;
+        enabled: boolean;
+      };
+
+      const client = await prisma.apiClient.findUnique({ where: { id: req.params.id } });
+      if (!client) return next(notFound('API client'));
+
+      const asset = await prisma.asset.findUnique({ where: { assetId } });
+      if (!asset) return next(badRequest('UNKNOWN_ASSET', `No asset with id "${assetId}".`));
+
+      const maxPerTxRaw = parseAmount(maxPerTx, asset.decimals, asset.symbol);
+      const maxPerDayRaw = parseAmount(maxPerDay, asset.decimals, asset.symbol);
+
+      if (maxPerTxRaw > maxPerDayRaw) {
+        return next(
+          badRequest(
+            'LIMIT_INCONSISTENT',
+            'The per-transaction limit cannot exceed the daily limit.',
+          ),
+        );
+      }
+
+      const limit = await prisma.spendingLimit.upsert({
+        where: { clientId_assetId: { clientId: client.id, assetId } },
+        update: {
+          maxPerTxRaw: maxPerTxRaw.toString(),
+          maxPerDayRaw: maxPerDayRaw.toString(),
+          enabled,
+        },
+        create: {
+          clientId: client.id,
+          assetId,
+          maxPerTxRaw: maxPerTxRaw.toString(),
+          maxPerDayRaw: maxPerDayRaw.toString(),
+          enabled,
+        },
+      });
+
+      await recordAudit({
+        actorType: 'admin',
+        action: 'limit.set',
+        entity: 'SpendingLimit',
+        entityId: limit.id,
+        after: { client: client.name, assetId, maxPerTx, maxPerDay, enabled },
+        req,
+      });
+
+      return res.json({
+        limit: { assetId, maxPerTx, maxPerDay, enabled: limit.enabled },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+/** DELETE /api/admin/clients/:id/limits/:assetId — revokes access to that asset. */
+adminRouter.delete('/clients/:id/limits/:assetId', canWrite, writeLimiter, async (req, res, next) => {
+  try {
+    await prisma.spendingLimit.deleteMany({
+      where: { clientId: req.params.id, assetId: req.params.assetId },
+    });
+
+    await recordAudit({
+      actorType: 'admin',
+      action: 'limit.revoke',
+      entity: 'SpendingLimit',
+      after: { clientId: req.params.id, assetId: req.params.assetId },
       req,
     });
 

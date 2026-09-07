@@ -19,6 +19,9 @@ export async function getStatus(): Promise<WalletStatus> {
     address: vault.isUnlocked() ? vault.currentAddress() : await vault.storedAddress(),
     osEncryptionAvailable: vault.isOsEncryptionAvailable(),
     autoLockSeconds: vault.getAutoLockSeconds(),
+    // Local signing by definition; the IPC layer overrides this when the
+    // backend reports that it signs on this installation's behalf.
+    custodial: false,
   };
 }
 

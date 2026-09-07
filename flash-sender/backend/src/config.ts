@@ -39,6 +39,15 @@ const schema = z.object({
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
+  /// Custodial sending. When both are set, the server holds the sending key
+  /// and signs on behalf of desktop clients; when either is absent, clients
+  /// sign locally with their own keys instead.
+  ///
+  /// Keep the vault OUTSIDE the web document root. See docs/CUSTODIAL.md for
+  /// what this mode does and does not protect against.
+  WALLET_VAULT_PATH: z.string().optional(),
+  WALLET_PASSPHRASE: z.string().min(16).optional(),
+
   /// Optional path to the built admin dashboard (admin/dist). When set, the
   /// dashboard is served from this same process and origin — which removes
   /// the CORS configuration entirely and means one domain and one TLS

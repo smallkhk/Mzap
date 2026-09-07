@@ -82,9 +82,38 @@ model ApiClient {
   lastSeenAt DateTime?
   createdAt  DateTime  @default(now())
 
-  transactions TransactionRecord[]
+  transactions   TransactionRecord[]
+  spendingLimits SpendingLimit[]
 
   @@map("api_clients")
+}
+
+/// Per-client, per-asset spending caps for custodial sending.
+///
+/// With one shared wallet, any client holding a valid API key can move funds.
+/// These caps are the mechanism that bounds what a leaked key can cost: a
+/// client with no limit row for an asset cannot send that asset at all, so
+/// access is opt-in per asset rather than blanket.
+model SpendingLimit {
+  id       String    @id @default(cuid())
+  clientId String
+  client   ApiClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  /// Asset.assetId this limit applies to.
+  assetId String
+
+  /// Maximum for a single transaction, in base units (decimal string).
+  maxPerTxRaw  String
+  /// Maximum total per rolling UTC day, in base units (decimal string).
+  maxPerDayRaw String
+
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, assetId])
+  @@index([assetId])
+  @@map("spending_limits")
 }
 
 // ---------------------------------------------------------------------------

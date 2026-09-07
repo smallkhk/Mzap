@@ -44,12 +44,30 @@ export interface AssetConfig {
   sortOrder: number;
 }
 
+/**
+ * How transactions get signed for this deployment.
+ *
+ *  local     — this installation holds its own key and signs on this machine.
+ *  custodial — the backend holds one shared sending wallet and signs on the
+ *              client's behalf; the user never imports a key.
+ */
+export type SigningMode = 'local' | 'custodial';
+
 export interface AppConfig {
   version: number;
   testnetOnly: boolean;
+  signingMode: SigningMode;
+  /** The shared sending address, in custodial mode. */
+  senderAddress: string | null;
   networks: NetworkConfig[];
   assets: AssetConfig[];
   fetchedAt: string;
+}
+
+/** What this installation may still send, as granted by the administrator. */
+export interface SpendingLimitInfo {
+  maxPerTx: string;
+  maxPerDay: string;
 }
 
 export interface WalletStatus {
@@ -62,6 +80,11 @@ export interface WalletStatus {
   osEncryptionAvailable: boolean;
   /** Seconds of inactivity before the vault re-locks itself. */
   autoLockSeconds: number;
+  /**
+   * True when the backend signs for this installation. The wallet setup and
+   * unlock screens are skipped entirely in that case — there is no local key.
+   */
+  custodial: boolean;
 }
 
 export interface BalanceInfo {

@@ -85,7 +85,11 @@ export function App() {
   }
 
   const backendConfigured = Boolean(settings?.apiBaseUrl && settings.hasApiKey);
-  const walletReady = wallet?.hasWallet && wallet.unlocked;
+
+  // In custodial mode the backend holds the sending key, so there is no local
+  // wallet to set up or unlock and the gate is skipped entirely.
+  const custodial = config?.signingMode === 'custodial';
+  const walletReady = custodial || Boolean(wallet?.hasWallet && wallet.unlocked);
 
   /**
    * Every network currently in play is a testnet, or at least one is mainnet.
@@ -123,7 +127,11 @@ export function App() {
         </nav>
 
         <div className="inline">
-          {wallet?.unlocked ? (
+          {custodial ? (
+            <span className="badge badge--info" title="The backend signs on this machine's behalf">
+              <span className="dot" aria-hidden /> Server wallet
+            </span>
+          ) : wallet?.unlocked ? (
             <Button
               size="sm"
               variant="secondary"

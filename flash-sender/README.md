@@ -30,15 +30,25 @@ derives or backfills a hash, and the backend's state machine makes `CONFIRMED`,
 afterwards. A transaction that was mined but reverted is reported as **Failed**,
 with an explanation that gas was spent and no funds moved.
 
-**2. Key material never leaves the signing process.**
+**2. Keys are never in the source, the bundle or the installer.**
 
-There is no private key, mnemonic or wallet password in the source, the
-bundles, the config files, the environment, the backend, or the installer. The
-user's key is imported at runtime, sealed with a scrypt-derived AES-256-GCM key
-and then wrapped with Windows DPAPI, and is only ever unsealed inside the
-Electron main process for the duration of one signing call. The backend
-actively **rejects** any request body containing a field that looks like key
-material.
+No private key, mnemonic or wallet password appears in the source, the bundles,
+the config files or the installer. Where the key lives at runtime depends on
+which of two modes you run:
+
+| Mode | Who holds the key | User experience |
+|---|---|---|
+| **Local** (default) | Each installation, on its own machine | User imports or creates a wallet; scrypt + AES-256-GCM, wrapped with Windows DPAPI |
+| **Custodial** | One wallet on your backend | User imports nothing; the server signs on their behalf, bounded by per-installation spending limits |
+
+In local mode the key is unsealed only inside the Electron main process, for
+the duration of one signing call, and the backend actively **rejects** any
+request body containing a field that looks like key material.
+
+Custodial mode puts a spendable key on your server so it can sign unattended —
+which means whoever controls the server controls the funds. That trade, and
+what bounds it, is set out in [`docs/CUSTODIAL.md`](docs/CUSTODIAL.md). Read it
+before enabling.
 
 ---
 
@@ -125,6 +135,7 @@ amount transferred by orders of magnitude.
 | [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md) | Building `Flash-Sender-by-Nora-Setup.exe`, code signing. |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Production backend deployment, TLS, hardening. |
 | [`docs/CPANEL.md`](docs/CPANEL.md) | Step-by-step cPanel deployment (shared hosting). |
+| [`docs/CUSTODIAL.md`](docs/CUSTODIAL.md) | Running one shared sending wallet on the backend, and its trade-offs. |
 | [`docs/API.md`](docs/API.md) | Full endpoint reference. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, key handling, what is and isn't protected. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module layout and the send pipeline. |
