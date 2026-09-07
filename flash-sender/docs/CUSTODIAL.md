@@ -97,7 +97,16 @@ start** rather than running a sending service that cannot sign.
 
 ### 4. Grant each installation a spending limit
 
-Nothing can send until you do this. Per client, per asset:
+Nothing can send until you do this. Per client, per asset.
+
+**In the dashboard** (the usual way): open **App keys**. In custodial mode the
+page shows the sending address at the top and an **Allowed to send** column;
+an installation with nothing granted reads `nothing` and cannot send. Click
+**Spending limits** on its row, pick the asset, enter the per-transaction and
+per-day caps in human units, and save. The same panel edits a cap, pauses one
+without losing the amounts, or revokes the asset outright.
+
+**Or over the API**, which is what the dashboard calls:
 
 ```bash
 TOKEN=$(curl -s -X POST https://send.eclipselivecam.online/api/auth/login \

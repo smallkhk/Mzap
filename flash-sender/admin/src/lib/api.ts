@@ -168,6 +168,20 @@ export interface Asset {
   sortOrder: number;
 }
 
+/**
+ * One installation's cap for one asset, in human units.
+ *
+ * The absence of an entry is meaningful: a client with no limit for an asset
+ * cannot send that asset at all. Granting a limit is how sending access is
+ * given in the first place.
+ */
+export interface SpendingLimit {
+  assetId: string;
+  maxPerTx: string;
+  maxPerDay: string;
+  enabled: boolean;
+}
+
 export interface AuditEntry {
   id: string;
   actorType: string;
@@ -235,6 +249,27 @@ export const api = {
       ),
     revoke: (id: string) =>
       raw<{ revoked: boolean }>(`/api/admin/clients/${id}/revoke`, { method: 'POST' }),
+
+    /** Spending limits — only meaningful when the backend signs custodially. */
+    limits: (id: string) =>
+      raw<{ limits: SpendingLimit[] }>(`/api/admin/clients/${id}/limits`),
+
+    setLimit: (id: string, limit: SpendingLimit) =>
+      raw<{ limit: SpendingLimit }>(`/api/admin/clients/${id}/limits`, {
+        method: 'PUT',
+        body: JSON.stringify(limit),
+      }),
+
+    revokeLimit: (id: string, assetId: string) =>
+      raw<{ revoked: boolean }>(
+        `/api/admin/clients/${id}/limits/${encodeURIComponent(assetId)}`,
+        { method: 'DELETE' },
+      ),
+  },
+
+  wallet: {
+    /** Whether this deployment holds the sending key, and at which address. */
+    get: () => raw<{ custodial: boolean; address: string | null }>('/api/admin/wallet'),
   },
 
   audit: {
