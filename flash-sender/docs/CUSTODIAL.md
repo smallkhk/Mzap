@@ -115,6 +115,20 @@ npm run grant-limit -- --client <id> --asset <id> --per-tx 100 --per-day 500
 npm run grant-limit -- --client <id> --asset <id> --revoke
 ```
 
+If the Prisma query engine panics on your host (`PANIC: timer has gone
+away` — a thread the shared-hosting process limit would not let it keep),
+the same commands are available without Prisma, through the `mysql`
+client:
+
+```bash
+node src/scripts/grantLimitSql.mjs
+node src/scripts/grantLimitSql.mjs --client <id> --asset <id> --per-tx 100 --per-day 500
+node src/scripts/grantLimitSql.mjs --client <id> --asset <id> --revoke
+```
+
+It reads `DATABASE_URL` from `.env`, and if `mysql` is missing too it
+prints the SQL to paste into phpMyAdmin.
+
 **Or over the API**, which is what the dashboard calls:
 
 ```bash
