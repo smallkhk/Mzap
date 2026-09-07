@@ -235,6 +235,7 @@ the desktop app on its next sync.
 | Desktop app: "backend URL must use https" | You entered `http://`. Use `https://send.eclipselivecam.online`. |
 | Desktop app: "API key not recognised" | Key was revoked or mistyped. Issue a new one in the dashboard under **App keys**. |
 | `prisma migrate dev` fails on shadow database | Expected on shared hosting. Use `npx prisma migrate deploy`. |
+| `Prisma Client could not locate the Query Engine for runtime "debian-openssl-1.0.x"` | The host runs an older OpenSSL than the machine that generated the client. `schema.prisma` already declares the extra `binaryTargets`; re-run `npx prisma generate` so the matching engine is downloaded. |
 
 ### Reading logs
 

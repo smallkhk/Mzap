@@ -12,6 +12,15 @@
 
 generator client {
   provider = "prisma-client-js"
+
+  // Query engines to ship with the generated client.
+  //
+  // "native" covers the machine that runs `prisma generate`. The explicit
+  // targets cover shared hosting (cPanel/CloudLinux), which commonly runs an
+  // older OpenSSL than the generating machine — without them the client
+  // generates fine and then fails at startup with
+  // "could not locate the Query Engine for runtime debian-openssl-1.0.x".
+  binaryTargets = ["native", "debian-openssl-1.0.x", "rhel-openssl-1.0.x"]
 }
 
 datasource db {
