@@ -23,11 +23,11 @@ const has = (name: string) => process.argv.includes(`--${name}`);
 
 /** Prints what is available, so the ids never have to be guessed. */
 async function listEverything() {
-  const [clients, assets] = await Promise.all([
-    prisma.apiClient.findMany({ orderBy: { createdAt: 'asc' } }),
-    prisma.asset.findMany({ orderBy: { symbol: 'asc' } }),
-  ]);
-
+  // Sequential on purpose. Concurrent queries against a query engine that is
+  // still starting panic with "timer has gone away" on some hosts, and this
+  // script is short-lived, so the engine is always cold when it runs.
+  const clients = await prisma.apiClient.findMany({ orderBy: { createdAt: 'asc' } });
+  const assets = await prisma.asset.findMany({ orderBy: { symbol: 'asc' } });
   const limits = await prisma.spendingLimit.findMany();
 
   const lines: string[] = ['', 'Installations (--client):', ''];
@@ -63,6 +63,10 @@ async function listEverything() {
 }
 
 async function main() {
+  // Open the connection before any query, so the engine is up rather than
+  // being started underneath the first one.
+  await prisma.$connect();
+
   const clientId = arg('client');
   const assetId = arg('asset');
 
