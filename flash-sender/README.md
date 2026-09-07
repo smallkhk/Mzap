@@ -15,7 +15,7 @@ client.**
 | Component | Stack | Purpose |
 |---|---|---|
 | `desktop/` | Electron + React + TypeScript + ethers v6 | The Windows application. Signs and broadcasts real transactions. |
-| `backend/` | Node + Express + TypeScript + Prisma + PostgreSQL | Source of truth for networks/assets, plus the transaction ledger. |
+| `backend/` | Node + Express + TypeScript + Prisma + MySQL/MariaDB | Source of truth for networks/assets, plus the transaction ledger. Optionally serves the dashboard too. |
 | `admin/` | React + TypeScript + Vite | Web dashboard for managing assets, networks and app keys. |
 
 ### Two guarantees the code enforces
@@ -44,12 +44,12 @@ material.
 
 ## Quick start
 
-Prerequisites: **Node 20+**, **PostgreSQL 14+**. Windows builds additionally need
+Prerequisites: **Node 20+**, **MySQL 8 / MariaDB 10.4+**. Windows builds additionally need
 Windows (or Wine) — see [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md).
 
 ```bash
 # 1. Database
-docker compose up -d            # or point DATABASE_URL at your own Postgres
+docker compose up -d            # or point DATABASE_URL at your own MySQL/MariaDB
 
 # 2. Backend
 cd backend
@@ -124,6 +124,7 @@ amount transferred by orders of magnitude.
 | [`docs/ADDING-A-TOKEN.md`](docs/ADDING-A-TOKEN.md) | Adding your first token through the dashboard. |
 | [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md) | Building `Flash-Sender-by-Nora-Setup.exe`, code signing. |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Production backend deployment, TLS, hardening. |
+| [`docs/CPANEL.md`](docs/CPANEL.md) | Step-by-step cPanel deployment (shared hosting). |
 | [`docs/API.md`](docs/API.md) | Full endpoint reference. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, key handling, what is and isn't protected. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module layout and the send pipeline. |

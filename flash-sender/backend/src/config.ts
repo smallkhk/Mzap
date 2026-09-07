@@ -39,6 +39,12 @@ const schema = z.object({
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
+  /// Optional path to the built admin dashboard (admin/dist). When set, the
+  /// dashboard is served from this same process and origin — which removes
+  /// the CORS configuration entirely and means one domain and one TLS
+  /// certificate. Intended for single-app hosts such as cPanel.
+  ADMIN_DIST_PATH: z.string().optional(),
+
   /// Refuse to serve mainnet (non-testnet) networks. Set this to true on a
   /// development deployment so a mistake cannot move real funds.
   TESTNET_ONLY: z

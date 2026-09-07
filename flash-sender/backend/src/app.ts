@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import helmet from 'helmet';
 import cors from 'cors';
 import pinoHttp from 'pino-http';
@@ -19,14 +21,24 @@ export function createApp() {
   if (config.TRUST_PROXY) app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
+  // When this process also serves the dashboard, the policy must allow that
+  // page's own bundle. A pure API keeps the tighter "deny everything" policy.
+  const cspDirectives: Record<string, string[]> = config.ADMIN_DIST_PATH
+    ? {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"], // Vite inlines critical CSS
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"], // same-origin API calls only
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      }
+    : { defaultSrc: ["'none'"], frameAncestors: ["'none'"] };
+
   app.use(
     helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'none'"],
-          frameAncestors: ["'none'"],
-        },
-      },
+      contentSecurityPolicy: { directives: cspDirectives },
       hsts: config.REQUIRE_HTTPS
         ? { maxAge: 31_536_000, includeSubDomains: true, preload: true }
         : false,
@@ -91,6 +103,30 @@ export function createApp() {
   app.use('/api', configRouter);
   app.use('/api', transactionsRouter);
   app.use('/api/admin', adminRouter);
+
+  // Optionally serve the admin dashboard from this same process. Doing so
+  // makes the dashboard same-origin with the API, so no CORS entry is needed
+  // and a single certificate covers both. Mounted after the API routes, so it
+  // can never shadow an endpoint.
+  if (config.ADMIN_DIST_PATH) {
+    const distPath = path.resolve(config.ADMIN_DIST_PATH);
+    const indexFile = path.join(distPath, 'index.html');
+
+    if (fs.existsSync(indexFile)) {
+      app.use(express.static(distPath, { index: false, maxAge: '1h' }));
+
+      // The dashboard is a single-page app: any non-API path falls back to
+      // index.html so a deep link or a refresh still loads it.
+      app.get(/^(?!\/api\/|\/health).*/, (_req, res) => res.sendFile(indexFile));
+
+      logger.info({ distPath }, 'Serving the admin dashboard from this process');
+    } else {
+      logger.warn(
+        { distPath },
+        'ADMIN_DIST_PATH is set but no index.html was found there; the dashboard is not being served',
+      );
+    }
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);

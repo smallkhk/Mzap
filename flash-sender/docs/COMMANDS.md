@@ -20,24 +20,29 @@ Node 20 or newer is required by all three.
 
 ## 2. Database
 
-The backend uses PostgreSQL. Either use the bundled compose file:
+The backend uses MySQL / MariaDB. Either use the bundled compose file:
 
 ```bash
 # From flash-sender/
-docker compose up -d          # postgres on localhost:5432, user/pass/db = flash
+docker compose up -d          # mariadb on localhost:3306, user/pass/db = flash
 docker compose logs -f db     # follow startup
 docker compose down           # stop (keeps the volume)
 docker compose down -v        # stop and DELETE all data
 ```
 
-…or point `DATABASE_URL` in `backend/.env` at any Postgres you already run.
+…or point `DATABASE_URL` in `backend/.env` at any MySQL/MariaDB you already run.
+
+On shared hosting (cPanel), see [CPANEL.md](CPANEL.md) — those accounts cannot
+create the shadow database `migrate dev` needs, so `migrate deploy` is used
+instead against the committed migration.
 
 Create the schema:
 
 ```bash
 cd backend
 npm run prisma:migrate        # development: creates + applies a migration
-npm run prisma:deploy         # production: applies existing migrations only
+npm run prisma:deploy         # production/shared hosting: applies existing migrations
+npm run prisma:diff           # regenerate migration SQL without a shadow database
 npm run prisma:studio         # optional: browse the data in a GUI
 ```
 
@@ -201,7 +206,7 @@ Both are encrypted with Windows DPAPI and stored in
 
 ```bash
 NODE_ENV=production
-DATABASE_URL=postgresql://user:pass@host:5432/flashsender?sslmode=require
+DATABASE_URL="mysql://user:pass@host:3306/flashsender"
 JWT_SECRET=<48 random bytes, base64url>
 ADMIN_ORIGINS=https://admin.yourdomain.com
 REQUIRE_HTTPS=true

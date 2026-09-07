@@ -284,7 +284,9 @@ transactionsRouter.get(
         ...(q.status ? { status: q.status } : {}),
         ...(q.chainId ? { chainId: q.chainId } : {}),
         ...(q.assetId ? { assetId: q.assetId } : {}),
-        ...(q.from ? { fromAddress: { equals: q.from, mode: 'insensitive' } } : {}),
+        // No `mode: 'insensitive'`: the schema's utf8mb4_unicode_ci collation
+        // already compares case-insensitively, and MySQL rejects the option.
+        ...(q.from ? { fromAddress: { equals: q.from } } : {}),
         ...(q.fromDate || q.toDate
           ? {
               submittedAt: {
@@ -296,10 +298,10 @@ transactionsRouter.get(
         ...(q.search
           ? {
               OR: [
-                { txHash: { contains: q.search, mode: 'insensitive' } },
-                { toAddress: { contains: q.search, mode: 'insensitive' } },
-                { fromAddress: { contains: q.search, mode: 'insensitive' } },
-                { symbol: { contains: q.search, mode: 'insensitive' } },
+                { txHash: { contains: q.search } },
+                { toAddress: { contains: q.search } },
+                { fromAddress: { contains: q.search } },
+                { symbol: { contains: q.search } },
               ],
             }
           : {}),

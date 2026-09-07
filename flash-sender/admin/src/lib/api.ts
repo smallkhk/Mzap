@@ -7,7 +7,16 @@
  * re-login, and is rotated on every use by the backend.
  */
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000').replace(/\/+$/, '');
+/**
+ * API base URL.
+ *
+ * Empty means "same origin", which is how the dashboard runs when the backend
+ * serves it (the cPanel/single-app deployment): requests go to /api/... on
+ * whatever host the page was loaded from, so there is nothing to configure and
+ * no CORS involved. Set VITE_API_BASE_URL only when the dashboard is hosted
+ * separately from the API.
+ */
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
 const REFRESH_KEY = 'fs.admin.refresh';
 
@@ -52,8 +61,10 @@ async function raw<T>(path: string, init: RequestInit = {}, retry = true): Promi
   } catch {
     throw new ApiError(
       'NETWORK',
-      `Could not reach the backend at ${BASE}. Check that it is running and that this origin is ` +
-        'in its ADMIN_ORIGINS list.',
+      BASE
+        ? `Could not reach the backend at ${BASE}. Check that it is running and that this ` +
+          'origin is listed in its ADMIN_ORIGINS setting.'
+        : 'Could not reach the backend. It may be restarting — refresh in a moment.',
     );
   }
 

@@ -1,5 +1,6 @@
 import type { Asset, Network, TransactionRecord } from '@prisma/client';
 import { explorerTxUrl } from '../lib/chain';
+import { decodeUrlList } from '../lib/columns';
 
 export type AssetWithNetwork = Asset & { network: Network };
 
@@ -19,7 +20,7 @@ export function serializeAsset(asset: AssetWithNetwork) {
       key: asset.network.key,
       name: asset.network.name,
       chainId: asset.network.chainId,
-      rpcUrls: asset.network.rpcUrls,
+      rpcUrls: decodeUrlList(asset.network.rpcUrlsRaw),
       explorerUrl: asset.network.explorerUrl,
       nativeSymbol: asset.network.nativeSymbol,
       nativeName: asset.network.nativeName,
@@ -43,7 +44,7 @@ export function serializeNetwork(network: Network) {
     key: network.key,
     name: network.name,
     chainId: network.chainId,
-    rpcUrls: network.rpcUrls,
+    rpcUrls: decodeUrlList(network.rpcUrlsRaw),
     explorerUrl: network.explorerUrl,
     nativeSymbol: network.nativeSymbol,
     nativeName: network.nativeName,

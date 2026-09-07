@@ -17,6 +17,17 @@ import { recordAudit } from '../services/audit';
 import { bumpConfigVersion, getConfigVersion } from '../services/configVersion';
 import { serializeAsset, serializeNetwork } from '../services/serialize';
 import { generateApiKey } from '../lib/crypto';
+import { encodeUrlList } from '../lib/columns';
+
+/**
+ * Splits the validated `rpcUrls` array off the request body and returns it in
+ * the storage shape. The API keeps taking and returning an array; only the
+ * column underneath is text.
+ */
+function toNetworkData(body: Record<string, unknown> & { rpcUrls?: string[] }) {
+  const { rpcUrls, ...rest } = body;
+  return rpcUrls === undefined ? rest : { ...rest, rpcUrlsRaw: encodeUrlList(rpcUrls) };
+}
 
 export const adminRouter = Router();
 
@@ -61,7 +72,9 @@ adminRouter.post(
         );
       }
 
-      const created = await prisma.network.create({ data: body });
+      const created = await prisma.network.create({
+        data: toNetworkData(body) as Prisma.NetworkUncheckedCreateInput,
+      });
       const version = await bumpConfigVersion();
 
       await recordAudit({
@@ -100,7 +113,10 @@ adminRouter.put(
         );
       }
 
-      const updated = await prisma.network.update({ where: { key: req.params.key }, data: body });
+      const updated = await prisma.network.update({
+        where: { key: req.params.key },
+        data: toNetworkData(body) as Prisma.NetworkUncheckedUpdateInput,
+      });
       const version = await bumpConfigVersion();
 
       await recordAudit({

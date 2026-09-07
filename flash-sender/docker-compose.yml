@@ -1,21 +1,26 @@
-# Local PostgreSQL for development.
-# Production deployments should use a managed database — see docs/DEPLOYMENT.md.
+# Local MariaDB for development, matching what shared hosting (cPanel)
+# provides. Production deployments use the host's own database — see
+# docs/DEPLOYMENT.md and docs/CPANEL.md.
 
 services:
   db:
-    image: postgres:16-alpine
+    image: mariadb:11
     container_name: flash-sender-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: flash
-      POSTGRES_PASSWORD: flash
-      POSTGRES_DB: flashsender
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_USER: flash
+      MARIADB_PASSWORD: flash
+      MARIADB_DATABASE: flashsender
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     ports:
-      - '5432:5432'
+      - '3306:3306'
     volumes:
-      - flash-sender-db:/var/lib/postgresql/data
+      - flash-sender-db:/var/lib/mysql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U flash -d flashsender']
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 10s
       timeout: 5s
       retries: 5

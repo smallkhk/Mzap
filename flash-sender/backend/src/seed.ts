@@ -10,6 +10,7 @@ import { prisma } from './lib/db';
 import { logger } from './lib/logger';
 import { bumpConfigVersion } from './services/configVersion';
 import { normaliseAddress } from './lib/chain';
+import { encodeUrlList } from './lib/columns';
 
 const NETWORKS = [
   {
@@ -66,10 +67,13 @@ const NATIVE_ASSETS = [
 
 async function main() {
   for (const network of NETWORKS) {
+    const { rpcUrls, ...rest } = network;
+    const data = { ...rest, rpcUrlsRaw: encodeUrlList(rpcUrls) };
+
     const saved = await prisma.network.upsert({
       where: { key: network.key },
-      update: network,
-      create: network,
+      update: data,
+      create: data,
     });
     logger.info({ key: saved.key, chainId: saved.chainId }, 'Seeded network');
   }

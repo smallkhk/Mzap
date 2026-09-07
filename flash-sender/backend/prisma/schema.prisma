@@ -5,13 +5,17 @@
 // clients. It deliberately stores no key material of any kind: there is no
 // column anywhere in this schema for a private key, mnemonic or wallet
 // password, and the API rejects any payload carrying one.
+//
+// Targets MySQL 8 / MariaDB 10.4+, which is what shared hosting provides.
+// Values with no native column type there (URL lists, audit snapshots) are
+// stored as TEXT and encoded via src/lib/columns.ts.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -86,8 +90,10 @@ model Network {
   key           String   @unique // stable slug, e.g. "bsc", "bsc-testnet"
   name          String // "BNB Smart Chain"
   chainId       Int      @unique
-  rpcUrls       String[] // tried in order; must be https:// or wss://
-  explorerUrl   String // base explorer URL, e.g. https://bscscan.com
+  /// Newline-delimited list, tried in order; each must be https:// or wss://.
+  /// Read and written through encodeUrlList/decodeUrlList, never directly.
+  rpcUrlsRaw    String   @db.Text
+  explorerUrl   String   @db.VarChar(500) // base explorer URL, e.g. https://bscscan.com
   nativeSymbol  String // "BNB"
   nativeName    String // "BNB"
   nativeDecimals Int     @default(18)
@@ -113,13 +119,14 @@ model Asset {
   symbol          String // "USDT"
   networkId       String
   network         Network  @relation(fields: [networkId], references: [id], onDelete: Restrict)
-  /// Null for native assets. Stored EIP-55 checksummed.
-  contractAddress String?
+  /// Null for native assets. Stored EIP-55 checksummed. 42 chars; the length
+  /// is pinned because this column sits in a composite unique index.
+  contractAddress String?  @db.VarChar(42)
   decimals        Int
   isNative        Boolean  @default(false)
   /// Optional per-asset explorer override; falls back to the network's.
-  explorerUrl     String?
-  logoUrl         String?
+  explorerUrl     String?  @db.VarChar(500)
+  logoUrl         String?  @db.VarChar(500)
   enabled         Boolean  @default(true)
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
@@ -165,9 +172,9 @@ model TransactionRecord {
   id       String @id @default(cuid())
   /// Client-supplied idempotency key, unique per client. Prevents a retried
   /// POST from creating a duplicate ledger row.
-  clientRef String
+  clientRef String   @db.VarChar(36)
 
-  txHash   String?
+  txHash   String?  @db.VarChar(66)
   chainId  Int
   status   TxStatus @default(PREPARING)
 
@@ -193,7 +200,8 @@ model TransactionRecord {
   confirmations     Int     @default(0)
 
   errorCode    String?
-  errorMessage String?
+  /// Validation allows up to 1024 chars, past VARCHAR(191).
+  errorMessage String?  @db.Text
 
   submittedAt DateTime  @default(now())
   broadcastAt DateTime?
@@ -224,10 +232,11 @@ model AuditLog {
   action     String // "asset.create", "auth.login.failed", ...
   entity     String?
   entityId   String?
-  before     Json?
-  after      Json?
-  ip         String?
-  userAgent  String?
+  /// JSON snapshots, encoded via encodeJson/decodeJson.
+  before     String?  @db.Text
+  after      String?  @db.Text
+  ip         String?  @db.VarChar(45) // fits a full IPv6 literal
+  userAgent  String?  @db.VarChar(512)
   createdAt  DateTime @default(now())
 
   @@index([createdAt])

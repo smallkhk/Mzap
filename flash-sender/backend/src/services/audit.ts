@@ -1,7 +1,7 @@
 import type { Request } from 'express';
-import type { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db';
 import { logger } from '../lib/logger';
+import { encodeJson } from '../lib/columns';
 
 interface AuditInput {
   actorType: 'admin' | 'client' | 'system';
@@ -32,8 +32,8 @@ export async function recordAudit(input: AuditInput): Promise<void> {
         action: input.action,
         entity: input.entity ?? null,
         entityId: input.entityId ?? null,
-        before: (input.before ?? undefined) as Prisma.InputJsonValue | undefined,
-        after: (input.after ?? undefined) as Prisma.InputJsonValue | undefined,
+        before: encodeJson(input.before),
+        after: encodeJson(input.after),
         ip: req?.ip ?? null,
         userAgent: req?.header('user-agent')?.slice(0, 512) ?? null,
       },
