@@ -69,16 +69,26 @@ export function createApp() {
   }
 
   app.use(
-    cors({
-      origin(origin, callback) {
-        // Desktop clients send no Origin header; browsers must be allow-listed.
-        if (!origin || config.adminOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error(`Origin ${origin} is not permitted to call this API.`));
-      },
-      credentials: false,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
-      maxAge: 600,
+    cors((req, callback) => {
+      const origin = req.headers.origin;
+
+      // A request from the page this process is itself serving is not a
+      // cross-origin request at all. It still arrives with an Origin header —
+      // the dashboard's own bundle is marked `crossorigin` — and rejecting it
+      // would 500 the very files being served, so match it explicitly rather
+      // than relying on the deployer having listed their own domain.
+      const sameOrigin = origin === `${req.protocol}://${req.headers.host}`;
+
+      // Desktop clients send no Origin header; other browsers must be listed.
+      const permitted = !origin || sameOrigin || config.adminOrigins.includes(origin);
+
+      callback(permitted ? null : new Error(`Origin ${origin} is not permitted to call this API.`), {
+        origin: true,
+        credentials: false,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+        maxAge: 600,
+      });
     }),
   );
 

@@ -99,7 +99,8 @@ start** rather than running a sending service that cannot sign.
 
 Nothing can send until you do this. Per client, per asset.
 
-**In the dashboard** (the usual way): open **App keys**. In custodial mode the
+**In the dashboard** (the usual way, once it is deployed — see
+`admin/PREBUILT.md` for the three files to copy): open **App keys**. In custodial mode the
 page shows the sending address at the top and an **Allowed to send** column;
 an installation with nothing granted reads `nothing` and cannot send. Click
 **Spending limits** on its row, pick the asset, enter the per-transaction and

@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview --port 5174",
     "typecheck": "tsc --noEmit",
-    "build:checked": "npm run typecheck && npm run build"
+    "build:checked": "npm run typecheck && npm run build",
+    "prebuilt": "rm -rf prebuilt && cp -r dist prebuilt"
   },
   "dependencies": {
     "react": "^18.3.1",
