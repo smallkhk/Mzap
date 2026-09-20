@@ -9,7 +9,6 @@ import * as wallet from '../services/serverWallet';
 import * as chain from '../services/chainService';
 import { prisma } from '../lib/db';
 import { formatAmount } from '../lib/amount';
-import { AppError } from '../lib/errors';
 
 export const sendRouter = Router();
 
@@ -135,12 +134,17 @@ sendRouter.post(
   },
 );
 
-/** Guard: this router is meaningless without a server wallet. */
-sendRouter.use((_req, _res, next) => {
-  if (!wallet.isCustodial()) {
-    return next(
-      new AppError(503, 'NO_SERVER_WALLET', 'This deployment has no server wallet configured.'),
-    );
-  }
-  return next();
-});
+// No trailing custodial guard here on purpose. `GET /wallet` already
+// reports `custodial: false` inline rather than needing one, and
+// `sendService.prepare()` already refuses with NO_SERVER_WALLET when
+// there is no server wallet — a bare `router.use(fn)` with no path
+// previously stood here to enforce the same thing, but because it carried
+// no path of its own, Express applied it to *every* request that fell
+// through unmatched to this router, not just this router's own three
+// routes. Since this router is mounted at `/api` alongside several others,
+// that meant any request under `/api` not claimed by an earlier router —
+// including `/api/admin/*` and `/api/portal/*` — hit this guard, and in
+// local-signing mode (the default, no `WALLET_VAULT_PATH` configured) it
+// 503'd every one of them with "no server wallet configured" before they
+// ever reached the router that actually owned them. The admin dashboard
+// and the customer portal were both unreachable in non-custodial mode.

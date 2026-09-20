@@ -136,6 +136,7 @@ amount transferred by orders of magnitude.
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Production backend deployment, TLS, hardening. |
 | [`docs/CPANEL.md`](docs/CPANEL.md) | Step-by-step cPanel deployment (shared hosting). |
 | [`docs/CUSTODIAL.md`](docs/CUSTODIAL.md) | Running one shared sending wallet on the backend, and its trade-offs. |
+| [`docs/PORTAL.md`](docs/PORTAL.md) | Giving one customer a self-service panel scoped to their own key. |
 | [`docs/API.md`](docs/API.md) | Full endpoint reference. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, key handling, what is and isn't protected. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module layout and the send pipeline. |

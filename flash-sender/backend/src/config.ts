@@ -54,6 +54,11 @@ const schema = z.object({
   /// certificate. Intended for single-app hosts such as cPanel.
   ADMIN_DIST_PATH: z.string().optional(),
 
+  /// Optional path to the built customer portal (portal/dist), served under
+  /// the `/portal` path prefix on this same origin. Independent of
+  /// ADMIN_DIST_PATH — either can be set without the other.
+  PORTAL_DIST_PATH: z.string().optional(),
+
   /// Refuse to serve mainnet (non-testnet) networks. Set this to true on a
   /// development deployment so a mistake cannot move real funds.
   TESTNET_ONLY: z

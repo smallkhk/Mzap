@@ -14,6 +14,7 @@ import { configRouter } from './routes/config.routes';
 import { transactionsRouter } from './routes/transactions.routes';
 import { adminRouter } from './routes/admin.routes';
 import { sendRouter } from './routes/send.routes';
+import { portalRouter } from './routes/portal.routes';
 import { getConfigVersion } from './services/configVersion';
 
 export function createApp() {
@@ -22,9 +23,10 @@ export function createApp() {
   if (config.TRUST_PROXY) app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
-  // When this process also serves the dashboard, the policy must allow that
-  // page's own bundle. A pure API keeps the tighter "deny everything" policy.
-  const cspDirectives: Record<string, string[]> = config.ADMIN_DIST_PATH
+  // When this process also serves the dashboard and/or the customer portal,
+  // the policy must allow that page's own bundle. A pure API keeps the
+  // tighter "deny everything" policy.
+  const cspDirectives: Record<string, string[]> = config.ADMIN_DIST_PATH || config.PORTAL_DIST_PATH
     ? {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
@@ -115,11 +117,34 @@ export function createApp() {
   app.use('/api', transactionsRouter);
   app.use('/api', sendRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/portal', portalRouter);
+
+  // Optionally serve the customer portal under /portal, same origin as the
+  // API. A subpath rather than the root — the admin dashboard, if also
+  // served from this process, owns the root — so both can be mounted
+  // together without one swallowing the other's deep links.
+  if (config.PORTAL_DIST_PATH) {
+    const distPath = path.resolve(config.PORTAL_DIST_PATH);
+    const indexFile = path.join(distPath, 'index.html');
+
+    if (fs.existsSync(indexFile)) {
+      app.use('/portal', express.static(distPath, { index: false, maxAge: '1h' }));
+      app.get(/^\/portal(\/.*)?$/, (_req, res) => res.sendFile(indexFile));
+
+      logger.info({ distPath }, 'Serving the customer portal from this process at /portal');
+    } else {
+      logger.warn(
+        { distPath },
+        'PORTAL_DIST_PATH is set but no index.html was found there; the portal is not being served',
+      );
+    }
+  }
 
   // Optionally serve the admin dashboard from this same process. Doing so
   // makes the dashboard same-origin with the API, so no CORS entry is needed
-  // and a single certificate covers both. Mounted after the API routes, so it
-  // can never shadow an endpoint.
+  // and a single certificate covers both. Mounted after the API routes and
+  // the portal, so it can never shadow either — its catch-all only claims
+  // whatever is left.
   if (config.ADMIN_DIST_PATH) {
     const distPath = path.resolve(config.ADMIN_DIST_PATH);
     const indexFile = path.join(distPath, 'index.html');
@@ -127,9 +152,9 @@ export function createApp() {
     if (fs.existsSync(indexFile)) {
       app.use(express.static(distPath, { index: false, maxAge: '1h' }));
 
-      // The dashboard is a single-page app: any non-API path falls back to
-      // index.html so a deep link or a refresh still loads it.
-      app.get(/^(?!\/api\/|\/health).*/, (_req, res) => res.sendFile(indexFile));
+      // The dashboard is a single-page app: any non-API, non-portal path
+      // falls back to index.html so a deep link or a refresh still loads it.
+      app.get(/^(?!\/api\/|\/health|\/portal(\/|$)).*/, (_req, res) => res.sendFile(indexFile));
 
       logger.info({ distPath }, 'Serving the admin dashboard from this process');
     } else {

@@ -9,14 +9,15 @@ import {
   createApiClientSchema,
   createAssetSchema,
   createNetworkSchema,
+  setClientPortalSchema,
   setSpendingLimitSchema,
   updateAssetSchema,
   updateNetworkSchema,
 } from '../schemas';
-import { formatAmount, parseAmount } from '../lib/amount';
 import * as serverWallet from '../services/serverWallet';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { recordAudit } from '../services/audit';
+import { listLimitsFor, revokeLimitFor, setLimitFor } from '../services/spendingLimits';
 import { bumpConfigVersion, getConfigVersion } from '../services/configVersion';
 import { serializeAsset, serializeNetwork } from '../services/serialize';
 import { generateApiKey } from '../lib/crypto';
@@ -424,6 +425,7 @@ adminRouter.get('/clients', async (_req, res, next) => {
         name: c.name,
         keyPrefix: c.keyPrefix,
         isActive: c.isActive,
+        portalEnabled: c.portalEnabled,
         lastSeenAt: c.lastSeenAt?.toISOString() ?? null,
         createdAt: c.createdAt.toISOString(),
       })),
@@ -490,6 +492,47 @@ adminRouter.post('/clients/:id/revoke', canWrite, writeLimiter, async (req, res,
   }
 });
 
+/**
+ * PATCH /api/admin/clients/:id/portal
+ *
+ * Turns this one key's self-service panel on or off. It is the only thing
+ * that ever grants portal access — creating a key does not, and the panel
+ * itself has no route that could grant it to another key or to itself again
+ * once revoked.
+ */
+adminRouter.patch(
+  '/clients/:id/portal',
+  canWrite,
+  writeLimiter,
+  validate(setClientPortalSchema),
+  async (req, res, next) => {
+    try {
+      const { enabled } = req.body as { enabled: boolean };
+
+      const client = await prisma.apiClient.update({
+        where: { id: req.params.id },
+        data: { portalEnabled: enabled },
+      });
+
+      await recordAudit({
+        actorType: 'admin',
+        action: enabled ? 'client.portal.enable' : 'client.portal.disable',
+        entity: 'ApiClient',
+        entityId: client.id,
+        after: { portalEnabled: enabled },
+        req,
+      });
+
+      return res.json({ portalEnabled: client.portalEnabled });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        return next(notFound('API client'));
+      }
+      return next(err);
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Custodial wallet + spending limits
 // ---------------------------------------------------------------------------
@@ -509,29 +552,7 @@ adminRouter.get('/wallet', (_req, res) => {
 /** GET /api/admin/clients/:id/limits */
 adminRouter.get('/clients/:id/limits', async (req, res, next) => {
   try {
-    const limits = await prisma.spendingLimit.findMany({
-      where: { clientId: req.params.id },
-      orderBy: { assetId: 'asc' },
-    });
-
-    // Limits are stored in base units; present them in human units alongside
-    // the asset so the dashboard never has to know about decimals.
-    const assets = await prisma.asset.findMany({
-      where: { assetId: { in: limits.map((l) => l.assetId) } },
-    });
-    const decimalsByAsset = new Map(assets.map((a) => [a.assetId, a.decimals]));
-
-    res.json({
-      limits: limits.map((limit) => {
-        const decimals = decimalsByAsset.get(limit.assetId) ?? 18;
-        return {
-          assetId: limit.assetId,
-          maxPerTx: formatAmount(limit.maxPerTxRaw, decimals),
-          maxPerDay: formatAmount(limit.maxPerDayRaw, decimals),
-          enabled: limit.enabled,
-        };
-      }),
-    });
+    res.json({ limits: await listLimitsFor(req.params.id) });
   } catch (err) {
     next(err);
   }
@@ -551,59 +572,11 @@ adminRouter.put(
   validate(setSpendingLimitSchema),
   async (req, res, next) => {
     try {
-      const { assetId, maxPerTx, maxPerDay, enabled } = req.body as {
-        assetId: string;
-        maxPerTx: string;
-        maxPerDay: string;
-        enabled: boolean;
-      };
-
       const client = await prisma.apiClient.findUnique({ where: { id: req.params.id } });
       if (!client) return next(notFound('API client'));
 
-      const asset = await prisma.asset.findUnique({ where: { assetId } });
-      if (!asset) return next(badRequest('UNKNOWN_ASSET', `No asset with id "${assetId}".`));
-
-      const maxPerTxRaw = parseAmount(maxPerTx, asset.decimals, asset.symbol);
-      const maxPerDayRaw = parseAmount(maxPerDay, asset.decimals, asset.symbol);
-
-      if (maxPerTxRaw > maxPerDayRaw) {
-        return next(
-          badRequest(
-            'LIMIT_INCONSISTENT',
-            'The per-transaction limit cannot exceed the daily limit.',
-          ),
-        );
-      }
-
-      const limit = await prisma.spendingLimit.upsert({
-        where: { clientId_assetId: { clientId: client.id, assetId } },
-        update: {
-          maxPerTxRaw: maxPerTxRaw.toString(),
-          maxPerDayRaw: maxPerDayRaw.toString(),
-          enabled,
-        },
-        create: {
-          clientId: client.id,
-          assetId,
-          maxPerTxRaw: maxPerTxRaw.toString(),
-          maxPerDayRaw: maxPerDayRaw.toString(),
-          enabled,
-        },
-      });
-
-      await recordAudit({
-        actorType: 'admin',
-        action: 'limit.set',
-        entity: 'SpendingLimit',
-        entityId: limit.id,
-        after: { client: client.name, assetId, maxPerTx, maxPerDay, enabled },
-        req,
-      });
-
-      return res.json({
-        limit: { assetId, maxPerTx, maxPerDay, enabled: limit.enabled },
-      });
+      const limit = await setLimitFor(client.id, client.name, req.body, 'admin', req);
+      return res.json({ limit });
     } catch (err) {
       return next(err);
     }
@@ -613,18 +586,7 @@ adminRouter.put(
 /** DELETE /api/admin/clients/:id/limits/:assetId — revokes access to that asset. */
 adminRouter.delete('/clients/:id/limits/:assetId', canWrite, writeLimiter, async (req, res, next) => {
   try {
-    await prisma.spendingLimit.deleteMany({
-      where: { clientId: req.params.id, assetId: req.params.assetId },
-    });
-
-    await recordAudit({
-      actorType: 'admin',
-      action: 'limit.revoke',
-      entity: 'SpendingLimit',
-      after: { clientId: req.params.id, assetId: req.params.assetId },
-      req,
-    });
-
+    await revokeLimitFor(req.params.id, req.params.assetId, 'admin', req);
     return res.json({ revoked: true });
   } catch (err) {
     return next(err);

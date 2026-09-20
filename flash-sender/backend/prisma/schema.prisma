@@ -82,6 +82,13 @@ model ApiClient {
   lastSeenAt DateTime?
   createdAt  DateTime  @default(now())
 
+  /// Grants this one key holder a self-service web panel scoped to itself:
+  /// it can add tokens to the shared catalog and manage its own spending
+  /// limits, but has no route to see or create any other key. Off by
+  /// default — a key issued for the desktop app is not automatically a
+  /// portal login.
+  portalEnabled Boolean @default(false)
+
   transactions   TransactionRecord[]
   spendingLimits SpendingLimit[]
 

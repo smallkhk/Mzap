@@ -148,6 +148,25 @@ const assetShapeRule = <T extends { isNative: boolean; contractAddress?: string 
 
 export const createAssetSchema = assetBase.superRefine(assetShapeRule);
 
+/**
+ * What a portal customer may submit when adding a token themselves — a
+ * strict subset of the admin shape. `isNative`, `enabled` and `sortOrder`
+ * are never accepted from this surface: the server fixes them (a token
+ * added here is never the chain's native coin, and it goes live
+ * immediately), so there is no field here that could quietly relabel an
+ * existing native asset or hide/reorder the catalog.
+ */
+export const portalCreateAssetSchema = z.object({
+  assetId: slugSchema,
+  name: z.string().min(1).max(80),
+  symbol: z.string().min(1).max(16),
+  networkKey: slugSchema,
+  contractAddress: addressSchema,
+  decimals: decimalsSchema,
+  explorerUrl: explorerUrlSchema.nullish(),
+  logoUrl: z.string().url().nullish(),
+});
+
 export const updateAssetSchema = assetBase
   .partial()
   .omit({ assetId: true })
@@ -263,6 +282,10 @@ export const transactionQuerySchema = z.object({
 
 export const createApiClientSchema = z.object({
   name: z.string().min(1).max(80),
+});
+
+export const setClientPortalSchema = z.object({
+  enabled: z.boolean(),
 });
 
 // ---------------------------------------------------------------------------
