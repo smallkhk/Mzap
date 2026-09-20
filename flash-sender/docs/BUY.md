@@ -162,17 +162,18 @@ against yourself.
 ## What you can spend to buy
 
 Buying only accepts the chain's native coin or **the real USDT contract** —
-never any asset that happens to be in the catalog. This is checked against
-the actual contract address, not the label on the asset row: an asset in
-the dashboard's Assets list named "USDT" is not, by itself, trusted as USDT.
-Someone could add an asset with that symbol pointing at a different or
-fake contract — by mistake, or as an attack — and a symbol-only check would
-have accepted it. The real BNB Smart Chain USDT address
-(`0x55d398326f99059fF775485246999027B3197955`) is hardcoded and checked
-directly; anything else labeled USDT is refused with a clear error, even if
-it's enabled and configured correctly in every other respect. This is
-deliberately scoped to BNB Smart Chain only for now — USDT spends on any
-other chain are refused until a verified address is added for it too.
+never any asset that happens to be in the catalog. The real BNB Smart Chain
+USDT address (`0x55d398326f99059fF775485246999027B3197955`, 18 decimals) is
+hardcoded, and it's this hardcoded address — not a database lookup — that
+actually gets read, approved and spent whenever USDT is selected to spend.
+An asset row in the dashboard's Assets list named "USDT" is consulted only
+for its *label*, so it can appear as a friendly option in the picker; its
+own `contractAddress` field is never read for the buy feature, so it does
+not matter whether that row happens to be configured correctly. This is
+deliberate: an asset labeled "USDT" pointing at the wrong contract — by
+mistake, or by design — could otherwise have been spent as if it were real
+USDT. Deliberately scoped to BNB Smart Chain only for now — USDT spends on
+any other chain are refused until a verified address is added for it too.
 
 ---
 

@@ -94,11 +94,14 @@ const SLIPPAGE_BPS = 100n; // 1%
 
 // The real, verified USDT deployment — not just any asset a dashboard admin
 // might have labeled "USDT". Checked against both a live on-chain symbol()
-// read and LI.FI's own curated token list before being hardcoded here.
-// Deliberately scoped to BNB Smart Chain only; buying rejects USDT spends on
-// any other chain until a verified address is added for it.
-const REAL_USDT_ADDRESS: Record<number, string> = {
-  56: '0x55d398326f99059fF775485246999027B3197955', // BNB Smart Chain
+// read and LI.FI's own curated token list before being hardcoded here. This
+// is the address and decimals actually used whenever USDT is selected to
+// spend, regardless of what a same-symbol asset row in the catalog has
+// configured — that row is only consulted for its label. Deliberately
+// scoped to BNB Smart Chain only; buying rejects USDT spends on any other
+// chain until a verified address is added for it.
+const REAL_USDT: Record<number, { address: string; decimals: number }> = {
+  56: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 }, // BNB Smart Chain
 };
 
 interface LifiQuote {
@@ -285,31 +288,40 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     throw badRequest('UNKNOWN_ASSET', `No asset with id "${input.spendAssetId}".`);
   }
 
-  // Buying is deliberately restricted to the chain's native coin or the
-  // real, verified USDT contract — never just any asset row labeled "USDT"
-  // in the catalog. A dashboard asset's symbol is whatever whoever added it
-  // typed in; trusting that string alone would let a mislabeled or outright
-  // fake contract spend as if it were USDT. Checked against the actual
-  // contract address instead, so this can't be bypassed by adding a
-  // differently-addressed asset and calling the API directly.
+  // Buying is deliberately restricted to the chain's native coin or USDT.
+  // For USDT, the address and decimals actually used on-chain always come
+  // from REAL_USDT below, never from this asset row's own contractAddress
+  // or decimals fields — a dashboard asset's symbol is whatever whoever
+  // added it typed in, and its contract address could be wrong by mistake
+  // or by design. The row is only consulted for its *label*, to keep the
+  // picker friendly; everything that actually reads a balance, approves, or
+  // spends uses the hardcoded, verified contract, so a mislabeled or fake
+  // "USDT" asset can never be spent as if it were real USDT.
+  let spendContractAddress: string | null = null;
+  let spendDecimals = spendAsset.decimals;
+
   if (!spendAsset.isNative) {
-    const realUsdt = REAL_USDT_ADDRESS[spendAsset.network.chainId];
-    const isRealUsdt =
-      realUsdt !== undefined &&
-      spendAsset.contractAddress !== null &&
-      getAddress(spendAsset.contractAddress) === getAddress(realUsdt);
-    if (!isRealUsdt) {
+    if (spendAsset.symbol.toUpperCase() !== 'USDT') {
       throw badRequest(
         'UNSUPPORTED_SPEND_ASSET',
-        `Buying only accepts ${spendAsset.network.nativeSymbol} or the real USDT contract to spend, not ${spendAsset.symbol}.`,
+        `Buying only accepts ${spendAsset.network.nativeSymbol} or USDT to spend, not ${spendAsset.symbol}.`,
       );
     }
+    const real = REAL_USDT[spendAsset.network.chainId];
+    if (!real) {
+      throw badRequest(
+        'UNSUPPORTED_SPEND_ASSET',
+        `Buying with USDT isn't set up for ${spendAsset.network.name} yet.`,
+      );
+    }
+    spendContractAddress = real.address;
+    spendDecimals = real.decimals;
   }
 
   const fromAddress = await resolveFromAddress(identity);
   await chain.assertChainId(spendAsset.network);
 
-  const amountInRaw = parseAmount(input.amountIn, spendAsset.decimals, spendAsset.symbol);
+  const amountInRaw = parseAmount(input.amountIn, spendDecimals, spendAsset.symbol);
   const tokenAddress = getAddress(input.tokenAddress);
 
   // Read the target token live — never trust a pasted address without
@@ -339,19 +351,17 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
   // Balance checks against the address that will actually fund the swap.
   const spendBalance = spendAsset.isNative
     ? await chain.getNativeBalance(spendAsset.network, fromAddress)
-    : await chain.getTokenBalance(spendAsset.network, spendAsset.contractAddress!, fromAddress);
+    : await chain.getTokenBalance(spendAsset.network, spendContractAddress!, fromAddress);
 
   if (spendBalance < amountInRaw) {
     throw badRequest(
       'INSUFFICIENT_BALANCE',
-      `This wallet holds ${formatAmount(spendBalance, spendAsset.decimals)} ${spendAsset.symbol}, ` +
-        `less than the ${formatAmount(amountInRaw, spendAsset.decimals)} requested.`,
+      `This wallet holds ${formatAmount(spendBalance, spendDecimals)} ${spendAsset.symbol}, ` +
+        `less than the ${formatAmount(amountInRaw, spendDecimals)} requested.`,
     );
   }
 
-  const spendPathAddress = spendAsset.isNative
-    ? NATIVE_PSEUDO_ADDRESS
-    : getAddress(spendAsset.contractAddress!);
+  const spendPathAddress = spendAsset.isNative ? NATIVE_PSEUDO_ADDRESS : getAddress(spendContractAddress!);
 
   const [lifi, oneInchOut, buySettings] = await Promise.all([
     quoteLifi(spendAsset.network.chainId, spendPathAddress, tokenAddress, amountInRaw, fromAddress, config.LIFI_API_KEY),
@@ -379,8 +389,8 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     networkKey: spendAsset.network.key,
     spendAssetId: spendAsset.assetId,
     spendIsNative: spendAsset.isNative,
-    spendContractAddress: spendAsset.contractAddress,
-    spendDecimals: spendAsset.decimals,
+    spendContractAddress,
+    spendDecimals,
     spendSymbol: spendAsset.symbol,
     amountInRaw,
     tokenAddress,
@@ -410,7 +420,7 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     tokenSymbol,
     tokenDecimals,
     spendSymbol: spendAsset.symbol,
-    amountInDisplay: formatAmount(amountInRaw, spendAsset.decimals),
+    amountInDisplay: formatAmount(amountInRaw, spendDecimals),
     marketAmountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals),
     buyerAmountOutDisplay: formatAmount(buyerAmountRaw, tokenDecimals),
     markupBps,
