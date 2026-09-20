@@ -6,6 +6,7 @@ interface Client {
   name: string;
   keyPrefix: string;
   isActive: boolean;
+  portalEnabled: boolean;
   lastSeenAt: string | null;
   createdAt: string;
 }
@@ -88,6 +89,9 @@ export function ClientsPage({ readOnly }: { readOnly: boolean }) {
           <h2>Application keys</h2>
           <p className="muted">
             One key per desktop installation. Paste it into the app under Settings → Backend.
+            Toggle <strong>Portal</strong> on to also let that key sign in at{' '}
+            <code className="mono">/portal</code> and manage its own limits and tokens —
+            separate from, and off by default for, every key.
           </p>
         </div>
       </div>
@@ -130,6 +134,7 @@ export function ClientsPage({ readOnly }: { readOnly: boolean }) {
               <th>Name</th>
               <th>Key prefix</th>
               <th>Status</th>
+              <th>Portal</th>
               {custodial && <th>Allowed to send</th>}
               <th>Last seen</th>
               <th>Created</th>
@@ -147,6 +152,33 @@ export function ClientsPage({ readOnly }: { readOnly: boolean }) {
                     <span className={`chip ${client.isActive ? 'chip--ok' : 'chip--off'}`}>
                       {client.isActive ? 'active' : 'revoked'}
                     </span>
+                  </td>
+                  <td>
+                    {readOnly ? (
+                      <span className={`chip ${client.portalEnabled ? 'chip--ok' : 'chip--off'}`}>
+                        {client.portalEnabled ? 'enabled' : 'off'}
+                      </span>
+                    ) : (
+                      <button
+                        className={`btn btn--sm ${client.portalEnabled ? '' : 'btn--ghost'}`}
+                        disabled={!client.isActive}
+                        title={
+                          client.portalEnabled
+                            ? 'This key can sign in to the self-service portal at /portal.'
+                            : 'Grant this key its own login at /portal — separate from sending access.'
+                        }
+                        onClick={async () => {
+                          try {
+                            await api.clients.setPortal(client.id, !client.portalEnabled);
+                            await load();
+                          } catch (err) {
+                            setError(err instanceof ApiError ? err.message : 'Failed to update portal access.');
+                          }
+                        }}
+                      >
+                        {client.portalEnabled ? 'Portal: on' : 'Portal: off'}
+                      </button>
+                    )}
                   </td>
                   {custodial && (
                     <td>

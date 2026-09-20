@@ -267,6 +267,7 @@ export const api = {
           name: string;
           keyPrefix: string;
           isActive: boolean;
+          portalEnabled: boolean;
           lastSeenAt: string | null;
           createdAt: string;
         }[];
@@ -278,6 +279,12 @@ export const api = {
       ),
     revoke: (id: string) =>
       raw<{ revoked: boolean }>(`/api/admin/clients/${id}/revoke`, { method: 'POST' }),
+
+    setPortal: (id: string, enabled: boolean) =>
+      raw<{ portalEnabled: boolean }>(`/api/admin/clients/${id}/portal`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
 
     /** Spending limits — only meaningful when the backend signs custodially. */
     limits: (id: string) =>
