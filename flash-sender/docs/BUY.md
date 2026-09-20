@@ -3,14 +3,19 @@
 A swap feature, deliberately not called one anywhere a customer sees it —
 "Generate tokens" — since "swap" invites the wrong expectation for something
 this specific: paste a token's contract address, spend from a wallet this app
-already controls, and the purchase lands in that same wallet. Two versions of
-it exist, sharing one backend pipeline:
+already controls, and the purchase lands there. Two versions of it exist,
+sharing one backend pipeline:
 
-- **The admin dashboard's** — spends the shared custodial wallet's own funds.
-  No markup; there's no one to charge.
+- **The admin dashboard's** — spends the shared custodial wallet's own funds,
+  and the purchase lands right back in that same wallet. No markup; there's
+  no one to charge.
 - **The customer portal's** — spends a deposit address generated for that one
   customer. A markup you set is real: the customer is credited less than the
-  market rate, and the difference is sent on-chain to a profit address.
+  market rate, and the difference is sent on-chain to a profit address. The
+  remainder doesn't stay in the customer's deposit address — see
+  [below](#the-sweep-to-the-custodial-wallet) — it moves into the shared
+  custodial wallet immediately after the buy, the same balance the send
+  feature actually spends from.
 
 ---
 
@@ -33,8 +38,10 @@ prepare (quote)                              execute (confirm)
   ├─ turn the winning route into an already-       │  *actual* amount received
   │  ready transaction via LI.FI, store it with   ├─ (customer buys only) send
   │  an extra 1% slippage floor, by an opaque id   │  the markup cut on-chain
-  └─ show the comparison + what the buyer         └─ to the profit address
-     will actually receive
+  └─ show the comparison + what the buyer         │  to the profit address
+     will actually receive                        └─ (customer buys only) sweep
+                                                      the rest to the custodial
+                                                      wallet
 ```
 
 Execution goes through **LI.FI**. It aggregates across many underlying
@@ -95,6 +102,35 @@ Restart. The startup log confirms it unlocked. Absent configuration just
 means the buy feature stays off — the portal's "Generate tokens" tab doesn't
 appear, and the admin dashboard's shows a plain "not configured" message
 instead of erroring.
+
+---
+
+## The sweep to the custodial wallet
+
+A customer's deposit wallet exists to fund and receive their buy — it isn't
+a wallet the rest of the app can spend from. The **send** feature (the
+actual flash-sender) only ever signs from the one shared custodial wallet in
+[`CUSTODIAL.md`](CUSTODIAL.md); a customer's spending limit is an allowance
+against that single shared balance, not a balance of their own. Left in
+their deposit wallet, a customer's purchase would just sit there, unusable
+by anything else in the app.
+
+So immediately after a customer buy confirms — after the swap, and after the
+markup skim if one applies — whatever the customer was credited is swept
+on-chain from their deposit wallet into the custodial wallet, using the same
+signing capability the app already holds over that address (it derived the
+key from the buy seed; the customer never had it). From the customer's side
+nothing changes: "credited" already meant an amount tracked by this app, not
+literal custody of an address they hold the key to, the same as everywhere
+else in this custodial design.
+
+This only happens when the deployment actually runs a custodial wallet. On a
+buy-only deployment with no shared wallet configured, there is nothing to
+feed, so the sweep is skipped — the purchase simply stays in the customer's
+deposit wallet, same as before this existed. The sweep is a plain ERC-20
+`transfer`, so it costs gas from the deposit wallet's own native balance —
+one more leg alongside the approve, the swap, and the markup skim; see
+**Operational notes** below on funding it.
 
 ---
 
@@ -174,11 +210,12 @@ does not do this check for you.
 ## Operational notes
 
 **Gas.** Every leg — the approve (if the spend asset is a token, not native),
-the swap, and the markup transfer (if one applies) — costs gas from the
-*buying* wallet's own native balance, separate from whatever it's spending.
-A deposit address funded with exactly enough USDT to buy but no native coin
-for gas will fail cleanly at the balance-check step with a message naming
-the shortfall.
+the swap, the markup transfer (if one applies), and the sweep to the
+custodial wallet (customer buys, on a deployment that runs one) — costs gas
+from the *buying* wallet's own native balance, separate from whatever it's
+spending. A deposit address funded with exactly enough USDT to buy but no
+native coin for gas will fail cleanly at the balance-check step with a
+message naming the shortfall.
 
 **Testnet liquidity is not production liquidity.** BSC testnet's real pools
 are whatever developers happened to seed and haven't drained since — quotes

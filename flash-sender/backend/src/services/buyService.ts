@@ -34,6 +34,14 @@ import { ERC20_APPROVE_ABI } from '../lib/pancakeswap';
  * unmodified, after re-estimating gas itself immediately before signing.
  * 1inch is queried directly too, as a second, independent quote for
  * comparison — it is never used to execute.
+ *
+ * A customer's purchase lands in their own deposit wallet, separate from
+ * the shared custodial wallet the send feature actually spends from — left
+ * there, it would be unreachable by the rest of the app. When this
+ * deployment runs a custodial wallet, `confirm` sweeps the purchase there
+ * immediately after the swap (and the markup skim, if any), the same kind
+ * of on-chain transfer as the skim itself, just addressed to the custodial
+ * wallet instead of the profit address.
  */
 
 // ---------------------------------------------------------------------------
@@ -609,6 +617,57 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
           });
         }
       }
+    }
+
+    // A customer's purchase lands in their own deposit wallet, not the
+    // shared custodial wallet the send feature actually spends from — left
+    // there, it would just sit unreachable by the rest of the app. Sweep it
+    // across immediately so it becomes part of the balance flash-sends draw
+    // from, the same on-chain transfer as the markup skim just above, only
+    // addressed to the custodial wallet instead of the profit address. Only
+    // meaningful when this deployment runs a custodial wallet at all —
+    // skipped, not failed, on a buy-only deployment with no shared wallet.
+    if (identity.kind === 'client' && creditedRaw > 0n && serverWallet.isCustodial()) {
+      const custodialAddress = serverWallet.address();
+      const sweepTxHash = await withChainLock(network.chainId, () =>
+        withSigner(identity, async (privateKey) => {
+          const iface = new Contract(quote.tokenAddress, [
+            'function transfer(address to, uint256 amount) returns (bool)',
+          ]).interface;
+          const sweepRequest = {
+            to: getAddress(quote.tokenAddress),
+            data: iface.encodeFunctionData('transfer', [custodialAddress, creditedRaw]),
+            value: 0n,
+          };
+          const fee = await chain.estimateFee(network, sweepRequest, fromAddress);
+          const nonce = await chain.getPendingNonce(network, fromAddress);
+
+          const response = await chain.signAndBroadcast(network, privateKey, {
+            ...sweepRequest,
+            nonce,
+            gasLimit: fee.gasLimit,
+            ...(fee.maxFeePerGas
+              ? { maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n }
+              : { gasPrice: fee.gasPrice ?? 0n }),
+          });
+          await waitForReceipt(network, response.hash);
+          return response.hash;
+        }),
+      );
+
+      await recordAudit({
+        actorType: 'system',
+        action: 'buy.sweep',
+        entity: 'TransactionRecord',
+        entityId: record.id,
+        after: {
+          clientId: identity.client.id,
+          tokenAddress: quote.tokenAddress,
+          sweptRaw: creditedRaw.toString(),
+          sweepTxHash,
+          custodialAddress,
+        },
+      });
     }
 
     const updated = await prisma.transactionRecord.update({
