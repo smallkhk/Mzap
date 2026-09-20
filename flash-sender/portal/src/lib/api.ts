@@ -123,6 +123,8 @@ export interface BuyQuote {
   buyerAmountOutDisplay: string;
   markupBps: number;
   executesVia: 'lifi';
+  /** Which of LI.FI's underlying tools (Fly, 1inch, an on-chain DEX, …) actually won on output. */
+  executionTool: string;
   comparisons: { source: string; amountOutDisplay: string }[];
   expiresInSeconds: number;
 }

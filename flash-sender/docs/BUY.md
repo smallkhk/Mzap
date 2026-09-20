@@ -25,26 +25,31 @@ prepare (quote)                              execute (confirm)
   │  (decimals(), symbol() read live —          ├─ approve LI.FI's named
   │   never trusted from the pasted address)    │  contract, if the spend
   ├─ check the spending wallet's real balance    │  asset is a token
-  ├─ quote LI.FI (its own route + an already-    ├─ sign and broadcast LI.FI's
-  │  ready transaction to sign) and 1inch        │  own transactionRequest —
-  │  (a second, independent quote) in parallel   │  never hand-built calldata
-  ├─ store the route + an extra 1% slippage      ├─ read the token balance
-  │  floor under LI.FI's own, by an opaque id    │  before/after to find the
-  └─ show the comparison + what the buyer         │  *actual* amount received
-     will actually receive                       ├─ (customer buys only) send
-                                                   │  the markup cut on-chain
-                                                   └─ to the profit address
+  ├─ ask LI.FI for *every* route it can find      ├─ sign and broadcast LI.FI's
+  │  (Fly, 1inch, Nordstern, whichever on-chain   │  own transactionRequest —
+  │  DEX has liquidity) and pick whichever         │  never hand-built calldata
+  │  actually returns the most, plus a second,    ├─ read the token balance
+  │  independent 1inch quote, in parallel         │  before/after to find the
+  ├─ turn the winning route into an already-       │  *actual* amount received
+  │  ready transaction via LI.FI, store it with   ├─ (customer buys only) send
+  │  an extra 1% slippage floor, by an opaque id   │  the markup cut on-chain
+  └─ show the comparison + what the buyer         └─ to the profit address
+     will actually receive
 ```
 
 Execution goes through **LI.FI**. It aggregates across many underlying
-on-chain routers and picks whichever actually has a working, liquid route
-for the pair — a single fixed router misses real tokens it has no pair for,
-which is exactly the failure mode a fixed-router design ran into. This app
-never hand-builds swap calldata: it signs and broadcasts LI.FI's own
-`transactionRequest` for the route it quoted, unmodified, after re-estimating
-gas itself immediately before signing — the `to` and `data` are never edited,
-only decided whether to sign. 1inch is queried too, as a second, independent
-quote for comparison; it is never used to execute.
+on-chain routers — Fly, 1inch, Nordstern, and whichever on-chain DEX
+actually has liquidity for the pair, the same pool jumper.xyz's own UI draws
+from, since Jumper is LI.FI's own front-end. A single quote call only
+returns LI.FI's own default pick among them, which is not always the
+best one — this app instead asks for every route LI.FI can find and picks
+whichever actually returns the most, shown in the dashboard as "best output
+found via `<tool>`". This app never hand-builds swap calldata: it signs and
+broadcasts LI.FI's own `transactionRequest` for the route it picked,
+unmodified, after re-estimating gas itself immediately before signing — the
+`to` and `data` are never edited, only decided whether to sign. 1inch is
+queried directly too, as a second, independent quote for comparison; it is
+never used to execute.
 
 `execute` takes only a reference to the quote, never the amount or token
 again — exactly like `send/confirm` — so a tampered client cannot change what

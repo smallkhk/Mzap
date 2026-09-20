@@ -231,7 +231,9 @@ function BuyForm({ assets }: { assets: Asset[] }) {
           </div>
 
           <p className="faint" style={{ margin: 0, fontSize: 12 }}>
-            Quote expires in {quote.expiresInSeconds}s — the rate is re-checked when you confirm.
+            Best output found via <strong>{quote.executionTool}</strong> — checked against every
+            route available for this pair, not just one router's default pick. Quote expires in{' '}
+            {quote.expiresInSeconds}s — the rate is re-checked when you confirm.
           </p>
 
           <div style={{ display: 'flex', gap: 10 }}>

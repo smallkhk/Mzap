@@ -23,13 +23,17 @@ import { ERC20_APPROVE_ABI } from '../lib/pancakeswap';
  * what gets bought between the screen and the signature.
  *
  * Execution goes through LI.FI. It aggregates across many underlying
- * on-chain routers and picks whichever actually has a working route for the
- * pair — a single fixed router misses real tokens it has no pair for. This
- * app never hand-builds the swap calldata itself: it signs and broadcasts
- * LI.FI's own `transactionRequest` for the route it quoted, unmodified,
- * after re-estimating gas itself immediately before signing. 1inch is
- * queried too, as a second, independent quote for comparison — it is never
- * used to execute.
+ * on-chain routers — Fly, 1inch, Nordstern, and whichever on-chain DEX
+ * actually has liquidity for the pair, the same pool jumper.xyz's own UI
+ * draws from, since Jumper is LI.FI's own front-end — and a single quote
+ * call only returns LI.FI's own default pick among them, not necessarily
+ * the best one. This app asks for every route LI.FI can find and picks
+ * whichever actually returns the most, never trusting LI.FI's default
+ * ordering. It never hand-builds the swap calldata itself: it signs and
+ * broadcasts LI.FI's own `transactionRequest` for the route it picked,
+ * unmodified, after re-estimating gas itself immediately before signing.
+ * 1inch is queried directly too, as a second, independent quote for
+ * comparison — it is never used to execute.
  */
 
 // ---------------------------------------------------------------------------
@@ -88,10 +92,19 @@ interface LifiQuote {
   transactionRequest: { to: string; data: string; value: string };
 }
 
+interface LifiRoute {
+  toAmount?: string;
+  steps?: Record<string, unknown>[];
+}
+
 /**
- * LI.FI's `/v1/quote` returns a ready-to-sign transaction alongside the
- * estimate — this app signs that verbatim (after its own fresh gas
- * estimate), never hand-building swap calldata itself.
+ * `/v1/advanced/routes` returns every route LI.FI can find across all of its
+ * integrated tools in one call — this app picks whichever actually returns
+ * the most, rather than trusting `/v1/quote`'s single default pick. The
+ * winning route's first step is then turned into a signable transaction via
+ * `/v1/advanced/stepTransaction`, which re-quotes it fresh in the process —
+ * this app signs that verbatim (after its own fresh gas estimate on top),
+ * never hand-building swap calldata itself.
  */
 async function quoteLifi(
   chainId: number,
@@ -101,32 +114,62 @@ async function quoteLifi(
   fromAddress: string,
   apiKey: string | undefined,
 ): Promise<LifiQuote | null> {
-  try {
-    const params = new URLSearchParams({
-      fromChain: String(chainId),
-      toChain: String(chainId),
-      fromToken: tokenIn,
-      toToken: tokenOut,
-      fromAddress,
-      toAddress: fromAddress, // the purchase lands back in the funding wallet
-      fromAmount: amountIn.toString(),
-      slippage: '0.01',
-      integrator: 'flash-sender',
-    });
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}),
+  };
 
-    const res = await fetch(`https://li.quest/v1/quote?${params.toString()}`, {
-      headers: { Accept: 'application/json', ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}) },
+  try {
+    const routesRes = await fetch('https://li.quest/v1/advanced/routes', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        fromChainId: chainId,
+        toChainId: chainId,
+        fromTokenAddress: tokenIn,
+        toTokenAddress: tokenOut,
+        fromAmount: amountIn.toString(),
+        fromAddress,
+        toAddress: fromAddress, // the purchase lands back in the funding wallet
+        options: { integrator: 'flash-sender', slippage: 0.01, order: 'RECOMMENDED' },
+      }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return null;
+    if (!routesRes.ok) return null;
 
-    const body = (await res.json()) as {
+    const routesBody = (await routesRes.json()) as { routes?: LifiRoute[] };
+    const routes = routesBody.routes;
+    if (!routes || routes.length === 0) return null;
+
+    let best: LifiRoute | null = null;
+    let bestOut = -1n;
+    for (const route of routes) {
+      if (!route.toAmount) continue;
+      const out = BigInt(route.toAmount);
+      if (out > bestOut) {
+        bestOut = out;
+        best = route;
+      }
+    }
+    const bestStep = best?.steps?.[0];
+    if (!bestStep) return null;
+
+    const txRes = await fetch('https://li.quest/v1/advanced/stepTransaction', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bestStep),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!txRes.ok) return null;
+
+    const txBody = (await txRes.json()) as {
       tool?: string;
       estimate?: { toAmount?: string; toAmountMin?: string; approvalAddress?: string };
       transactionRequest?: { to?: string; data?: string; value?: string };
     };
 
-    const { estimate, transactionRequest } = body;
+    const { estimate, transactionRequest } = txBody;
     if (
       !estimate?.toAmount ||
       !estimate.toAmountMin ||
@@ -141,7 +184,7 @@ async function quoteLifi(
       amountOutRaw: BigInt(estimate.toAmount),
       amountOutMinRaw: BigInt(estimate.toAmountMin),
       approvalAddress: getAddress(estimate.approvalAddress),
-      toolName: body.tool ?? 'unknown',
+      toolName: txBody.tool ?? (bestStep.tool as string | undefined) ?? 'unknown',
       transactionRequest: {
         to: getAddress(transactionRequest.to),
         data: transactionRequest.data,
@@ -345,6 +388,7 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     buyerAmountOutDisplay: formatAmount(buyerAmountRaw, tokenDecimals),
     markupBps,
     executesVia: 'lifi' as const,
+    executionTool: lifi.toolName,
     comparisons,
     expiresInSeconds: Math.floor(QUOTE_TTL_MS / 1000),
   };
