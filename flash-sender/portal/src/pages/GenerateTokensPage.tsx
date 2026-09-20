@@ -97,7 +97,9 @@ export function GenerateTokensPage() {
 }
 
 function BuyForm({ assets }: { assets: Asset[] }) {
-  const spendable = assets.filter((a) => a.isNative || a.contractAddress);
+  // Buying only accepts the chain's native coin or USDT to spend — enforced
+  // server-side too, so this is a picker restriction, not the actual gate.
+  const spendable = assets.filter((a) => a.isNative || a.symbol.toUpperCase() === 'USDT');
   const [spendAssetId, setSpendAssetId] = React.useState(spendable[0]?.id ?? '');
   const [tokenAddress, setTokenAddress] = React.useState('');
   const [amountIn, setAmountIn] = React.useState('');

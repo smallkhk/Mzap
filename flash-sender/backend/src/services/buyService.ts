@@ -228,6 +228,17 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     throw badRequest('UNKNOWN_ASSET', `No asset with id "${input.spendAssetId}".`);
   }
 
+  // Buying is deliberately restricted to the chain's native coin or USDT —
+  // not any asset that happens to be in the catalog. Enforced here, not
+  // just hidden in the picker, so it can't be bypassed by calling the API
+  // directly with a different spendAssetId.
+  if (!spendAsset.isNative && spendAsset.symbol.toUpperCase() !== 'USDT') {
+    throw badRequest(
+      'UNSUPPORTED_SPEND_ASSET',
+      `Buying only accepts ${spendAsset.network.nativeSymbol} or USDT to spend, not ${spendAsset.symbol}.`,
+    );
+  }
+
   const fromAddress = await resolveFromAddress(identity);
   await chain.assertChainId(spendAsset.network);
 
