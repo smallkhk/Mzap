@@ -308,13 +308,13 @@ export const setSpendingLimitSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * Basis points, capped at 5000 (50%) — not because a higher number is
- * unsafe to store, but because anything past that is almost certainly a
- * typo (2500 meant as "25%" entered as "2500%") and worth refusing rather
- * than silently taking effect on the next customer buy.
+ * Basis points, capped at 10000 (100%) — a hard mathematical ceiling, not a
+ * typo guard: the markup skims a percentage of what the swap actually
+ * returns, so above 100% there is nothing left to skim it from. At exactly
+ * 100% the buyer is credited nothing and the whole purchase becomes profit.
  */
 export const setBuySettingsSchema = z.object({
-  buyMarkupBps: z.number().int().min(0).max(5000).optional(),
+  buyMarkupBps: z.number().int().min(0).max(10_000).optional(),
   profitAddress: addressSchema.nullish(),
 });
 

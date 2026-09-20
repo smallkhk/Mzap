@@ -48,7 +48,7 @@ export function BuyPage({ readOnly }: { readOnly: boolean }) {
           <h2>Generate tokens</h2>
           <p className="muted">
             Spend the shared wallet's own balance to acquire a token by contract address. Quotes
-            are compared across PancakeSwap, 1inch and LI.FI; the purchase executes via PancakeSwap.
+            are compared against 1inch; the purchase executes via LI.FI.
           </p>
         </div>
       </div>

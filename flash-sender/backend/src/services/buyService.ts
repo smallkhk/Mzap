@@ -11,29 +11,25 @@ import * as serverWallet from './serverWallet';
 import * as buyWallet from './buyWallet';
 import { getBuySettings } from './appSettings';
 import { recordAudit } from './audit';
-import {
-  ERC20_APPROVE_ABI,
-  PANCAKE_V2_ROUTER,
-  PANCAKE_V2_ROUTER_ABI,
-  WRAPPED_NATIVE,
-} from '../lib/pancakeswap';
+import { ERC20_APPROVE_ABI } from '../lib/pancakeswap';
 
 /**
  * The buy / "Generate tokens" pipeline.
  *
  * Same two-phase shape as the send pipeline for the same reason: `prepare`
- * reads real state and quotes real routes, nothing is signed; `confirm`
- * re-verifies and executes exactly the route that was quoted, referenced
- * by an opaque id rather than re-submitted, so a tampered client cannot
- * change what gets bought between the screen and the signature.
+ * reads real state and quotes a real route, nothing is signed; `confirm`
+ * re-verifies and executes exactly the route that was quoted, referenced by
+ * an opaque id rather than re-submitted, so a tampered client cannot change
+ * what gets bought between the screen and the signature.
  *
- * Execution is PancakeSwap only, for now. 1inch and LI.FI are queried as
- * additional, genuinely-fetched quote sources so the buyer sees a real
- * price comparison — but only PancakeSwap's route is actually signed and
- * broadcast. Routing a signed transaction through a third-party
- * aggregator's returned calldata is a meaningfully larger trust and
- * verification surface than an on-chain router call this app controls
- * completely, and it is not yet built. See docs/BUY.md.
+ * Execution goes through LI.FI. It aggregates across many underlying
+ * on-chain routers and picks whichever actually has a working route for the
+ * pair — a single fixed router misses real tokens it has no pair for. This
+ * app never hand-builds the swap calldata itself: it signs and broadcasts
+ * LI.FI's own `transactionRequest` for the route it quoted, unmodified,
+ * after re-estimating gas itself immediately before signing. 1inch is
+ * queried too, as a second, independent quote for comparison — it is never
+ * used to execute.
  */
 
 // ---------------------------------------------------------------------------
@@ -73,56 +69,98 @@ async function withSigner<T>(
 // Quoting
 // ---------------------------------------------------------------------------
 
-interface QuoteSourceResult {
-  source: 'pancakeswap' | '1inch' | 'lifi';
+// The conventional placeholder both 1inch and LI.FI use for "the chain's
+// native coin" where an ERC-20 address is otherwise expected. Never
+// dereferenced on-chain — it only appears in these two APIs' request URLs.
+const NATIVE_PSEUDO_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+// A floor under LI.FI's own quoted output, absorbing normal price movement
+// between quoting and broadcasting. LI.FI reports its own `toAmountMin`
+// already adjusted for its chosen route's slippage; this is an *additional*
+// margin this app applies on top, not a replacement for it.
+const SLIPPAGE_BPS = 100n; // 1%
+
+interface LifiQuote {
   amountOutRaw: bigint;
+  amountOutMinRaw: bigint;
+  approvalAddress: string;
+  toolName: string;
+  transactionRequest: { to: string; data: string; value: string };
 }
 
-/** Candidate PancakeSwap V2 paths: direct, and via wrapped native if that isn't already an endpoint. */
-function candidatePaths(chainId: number, tokenIn: string, tokenOut: string): string[][] {
-  const wnative = WRAPPED_NATIVE[chainId];
-  const paths = [[tokenIn, tokenOut]];
-  if (wnative && tokenIn !== wnative && tokenOut !== wnative) {
-    paths.push([tokenIn, wnative, tokenOut]);
-  }
-  return paths;
-}
-
-async function quotePancakeSwap(
-  network: Network,
+/**
+ * LI.FI's `/v1/quote` returns a ready-to-sign transaction alongside the
+ * estimate — this app signs that verbatim (after its own fresh gas
+ * estimate), never hand-building swap calldata itself.
+ */
+async function quoteLifi(
+  chainId: number,
   tokenIn: string,
   tokenOut: string,
   amountIn: bigint,
-): Promise<{ amountOutRaw: bigint; path: string[] } | null> {
-  const routerAddress = PANCAKE_V2_ROUTER[network.chainId];
-  if (!routerAddress) return null;
+  fromAddress: string,
+  apiKey: string | undefined,
+): Promise<LifiQuote | null> {
+  try {
+    const params = new URLSearchParams({
+      fromChain: String(chainId),
+      toChain: String(chainId),
+      fromToken: tokenIn,
+      toToken: tokenOut,
+      fromAddress,
+      toAddress: fromAddress, // the purchase lands back in the funding wallet
+      fromAmount: amountIn.toString(),
+      slippage: '0.01',
+      integrator: 'flash-sender',
+    });
 
-  const provider = chain.getProvider(network);
-  const router = new Contract(routerAddress, PANCAKE_V2_ROUTER_ABI, provider);
+    const res = await fetch(`https://li.quest/v1/quote?${params.toString()}`, {
+      headers: { Accept: 'application/json', ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}) },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return null;
 
-  let best: { amountOutRaw: bigint; path: string[] } | null = null;
+    const body = (await res.json()) as {
+      tool?: string;
+      estimate?: { toAmount?: string; toAmountMin?: string; approvalAddress?: string };
+      transactionRequest?: { to?: string; data?: string; value?: string };
+    };
 
-  for (const path of candidatePaths(network.chainId, tokenIn, tokenOut)) {
-    try {
-      const amounts: bigint[] = await router.getAmountsOut!(amountIn, path);
-      const out = amounts[amounts.length - 1]!;
-      if (!best || out > best.amountOutRaw) best = { amountOutRaw: out, path };
-    } catch {
-      // No pair on this path, or insufficient liquidity. Try the next one.
+    const { estimate, transactionRequest } = body;
+    if (
+      !estimate?.toAmount ||
+      !estimate.toAmountMin ||
+      !estimate.approvalAddress ||
+      !transactionRequest?.to ||
+      !transactionRequest.data
+    ) {
+      return null;
     }
-  }
 
-  return best;
+    return {
+      amountOutRaw: BigInt(estimate.toAmount),
+      amountOutMinRaw: BigInt(estimate.toAmountMin),
+      approvalAddress: getAddress(estimate.approvalAddress),
+      toolName: body.tool ?? 'unknown',
+      transactionRequest: {
+        to: getAddress(transactionRequest.to),
+        data: transactionRequest.data,
+        value: transactionRequest.value ?? '0x0',
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
-/** 1inch only indexes BSC mainnet, and only when an API key is configured. */
+/** 1inch only indexes BSC mainnet, and only when an API key is configured. Quote-only — never used to execute. */
 async function quote1inch(
   chainId: number,
   tokenIn: string,
   tokenOut: string,
   amountIn: bigint,
   apiKey: string | undefined,
-): Promise<QuoteSourceResult | null> {
+): Promise<bigint | null> {
   if (!apiKey || chainId !== 56) return null;
 
   try {
@@ -138,52 +176,11 @@ async function quote1inch(
 
     const body = (await res.json()) as { dstAmount?: string; toAmount?: string };
     const amountOutRaw = body.dstAmount ?? body.toAmount;
-    if (!amountOutRaw) return null;
-
-    return { source: '1inch', amountOutRaw: BigInt(amountOutRaw) };
+    return amountOutRaw ? BigInt(amountOutRaw) : null;
   } catch {
     return null;
   }
 }
-
-/** LI.FI's basic quote endpoint works without a key; a key only raises rate limits. */
-async function quoteLifi(
-  chainId: number,
-  tokenIn: string,
-  tokenOut: string,
-  amountIn: bigint,
-  fromAddress: string,
-  apiKey: string | undefined,
-): Promise<QuoteSourceResult | null> {
-  try {
-    const params = new URLSearchParams({
-      fromChain: String(chainId),
-      toChain: String(chainId),
-      fromToken: tokenIn,
-      toToken: tokenOut,
-      fromAddress,
-      fromAmount: amountIn.toString(),
-    });
-
-    const res = await fetch(`https://li.quest/v1/quote?${params.toString()}`, {
-      headers: { Accept: 'application/json', ...(apiKey ? { 'x-lifi-api-key': apiKey } : {}) },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return null;
-
-    const body = (await res.json()) as { estimate?: { toAmount?: string } };
-    if (!body.estimate?.toAmount) return null;
-
-    return { source: 'lifi', amountOutRaw: BigInt(body.estimate.toAmount) };
-  } catch {
-    return null;
-  }
-}
-
-// The conventional placeholder both 1inch and LI.FI use for "the chain's
-// native coin" where an ERC-20 address is otherwise expected. Never
-// dereferenced on-chain — it only appears in these two APIs' request URLs.
-const NATIVE_PSEUDO_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
 interface StoredBuyQuote {
   identity: BuyIdentity;
@@ -198,7 +195,8 @@ interface StoredBuyQuote {
   tokenAddress: string;
   tokenDecimals: number;
   tokenSymbol: string | null;
-  path: string[];
+  approvalAddress: string;
+  transactionRequest: { to: string; data: string; value: string };
   amountOutRaw: bigint;
   amountOutMin: bigint;
   createdAt: number;
@@ -206,7 +204,6 @@ interface StoredBuyQuote {
 
 const quotes = new Map<string, StoredBuyQuote>();
 const QUOTE_TTL_MS = 2 * 60_000; // DEX prices move faster than a fixed send fee; a shorter window than sendService's.
-const SLIPPAGE_BPS = 100n; // 1% floor under the quoted output, to absorb normal price movement before broadcast.
 
 function reapQuotes() {
   const cutoff = Date.now() - QUOTE_TTL_MS;
@@ -252,7 +249,11 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
   if ((await provider.getCode(tokenAddress)) === '0x') {
     throw badRequest('NOT_A_CONTRACT', `There is no contract deployed at ${tokenAddress}.`);
   }
-  const tokenContract = new Contract(tokenAddress, ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'], provider);
+  const tokenContract = new Contract(
+    tokenAddress,
+    ['function decimals() view returns (uint8)', 'function symbol() view returns (string)'],
+    provider,
+  );
 
   let tokenDecimals: number;
   try {
@@ -278,44 +279,28 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     );
   }
 
-  const wnative = WRAPPED_NATIVE[spendAsset.network.chainId];
-  const spendPathAddress = spendAsset.isNative ? wnative : getAddress(spendAsset.contractAddress!);
-  if (!spendPathAddress) {
-    throw badRequest(
-      'UNSUPPORTED_NETWORK',
-      `Buying is not supported on ${spendAsset.network.name} yet — no router is configured.`,
-    );
-  }
+  const spendPathAddress = spendAsset.isNative
+    ? NATIVE_PSEUDO_ADDRESS
+    : getAddress(spendAsset.contractAddress!);
 
-  const [pancake, oneInch, lifi, buySettings] = await Promise.all([
-    quotePancakeSwap(spendAsset.network, spendPathAddress, tokenAddress, amountInRaw),
-    quote1inch(
-      spendAsset.network.chainId,
-      spendAsset.isNative ? NATIVE_PSEUDO_ADDRESS : spendPathAddress,
-      tokenAddress,
-      amountInRaw,
-      config.ONEINCH_API_KEY,
-    ),
-    quoteLifi(
-      spendAsset.network.chainId,
-      spendAsset.isNative ? NATIVE_PSEUDO_ADDRESS : spendPathAddress,
-      tokenAddress,
-      amountInRaw,
-      fromAddress,
-      config.LIFI_API_KEY,
-    ),
+  const [lifi, oneInchOut, buySettings] = await Promise.all([
+    quoteLifi(spendAsset.network.chainId, spendPathAddress, tokenAddress, amountInRaw, fromAddress, config.LIFI_API_KEY),
+    quote1inch(spendAsset.network.chainId, spendPathAddress, tokenAddress, amountInRaw, config.ONEINCH_API_KEY),
     getBuySettings(),
   ]);
 
-  if (!pancake) {
+  if (!lifi) {
     throw badRequest(
       'NO_ROUTE_FOUND',
-      `No PancakeSwap route was found from ${spendAsset.symbol} to this token. It may have no ` +
-        `liquidity on ${spendAsset.network.name}.`,
+      `No route was found from ${spendAsset.symbol} to this token. It may have no real liquidity ` +
+        `on ${spendAsset.network.name} — check the contract address carefully before trying again.`,
     );
   }
 
-  const amountOutMin = pancake.amountOutRaw - (pancake.amountOutRaw * SLIPPAGE_BPS) / 10_000n;
+  // LI.FI's own toAmountMin already accounts for its chosen route's
+  // slippage; this app's own floor sits under that as an additional
+  // margin, so a re-check just before broadcasting still has room.
+  const amountOutMin = lifi.amountOutMinRaw - (lifi.amountOutMinRaw * SLIPPAGE_BPS) / 10_000n;
 
   const quoteRef = crypto.randomUUID();
   quotes.set(quoteRef, {
@@ -331,24 +316,22 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     tokenAddress,
     tokenDecimals,
     tokenSymbol,
-    path: pancake.path,
-    amountOutRaw: pancake.amountOutRaw,
+    approvalAddress: lifi.approvalAddress,
+    transactionRequest: lifi.transactionRequest,
+    amountOutRaw: lifi.amountOutRaw,
     amountOutMin,
     createdAt: Date.now(),
   });
   reapQuotes();
 
   const markupBps = identity.kind === 'client' ? buySettings.buyMarkupBps : 0;
-  const buyerAmountRaw = pancake.amountOutRaw - (pancake.amountOutRaw * BigInt(markupBps)) / 10_000n;
+  const buyerAmountRaw = lifi.amountOutRaw - (lifi.amountOutRaw * BigInt(markupBps)) / 10_000n;
 
   const comparisons: { source: string; amountOutDisplay: string }[] = [
-    { source: 'pancakeswap', amountOutDisplay: formatAmount(pancake.amountOutRaw, tokenDecimals) },
+    { source: 'lifi', amountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals) },
   ];
-  if (oneInch) {
-    comparisons.push({ source: '1inch', amountOutDisplay: formatAmount(oneInch.amountOutRaw, tokenDecimals) });
-  }
-  if (lifi) {
-    comparisons.push({ source: 'lifi', amountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals) });
+  if (oneInchOut !== null) {
+    comparisons.push({ source: '1inch', amountOutDisplay: formatAmount(oneInchOut, tokenDecimals) });
   }
 
   return {
@@ -358,10 +341,10 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     tokenDecimals,
     spendSymbol: spendAsset.symbol,
     amountInDisplay: formatAmount(amountInRaw, spendAsset.decimals),
-    marketAmountOutDisplay: formatAmount(pancake.amountOutRaw, tokenDecimals),
+    marketAmountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals),
     buyerAmountOutDisplay: formatAmount(buyerAmountRaw, tokenDecimals),
     markupBps,
-    executesVia: 'pancakeswap' as const,
+    executesVia: 'lifi' as const,
     comparisons,
     expiresInSeconds: Math.floor(QUOTE_TTL_MS / 1000),
   };
@@ -412,9 +395,6 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
 
   await chain.assertChainId(network);
 
-  const routerAddress = PANCAKE_V2_ROUTER[network.chainId]!;
-  const deadline = Math.floor(Date.now() / 1000) + 600; // 10 minutes
-
   const record = await prisma.transactionRecord.create({
     data: {
       clientRef: quoteRef,
@@ -437,27 +417,33 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
     const tokenBefore = await chain.getTokenBalance(network, quote.tokenAddress, fromAddress);
 
     // Estimated and signed with the same rigor as a plain send: gas is
-    // estimated fresh right before signing (with the same 20% headroom
-    // `chain.estimateFee` applies everywhere else), not left to an
-    // implicit default — a router call is more failure-prone to
-    // under-estimate than a plain transfer, so guessing here is exactly
-    // the wrong place to save a request.
+    // re-estimated fresh right before signing (with the same 20% headroom
+    // `chain.estimateFee` applies everywhere else) rather than trusting the
+    // gas values embedded in the quote, which were current at quote time
+    // and may be stale by the time this actually broadcasts. The `to` and
+    // `data` from the quote are signed verbatim — this app never edits a
+    // third-party route's calldata, only decides whether to sign it.
     const swapHash = await withChainLock(network.chainId, () =>
       withSigner(identity, async (privateKey) => {
-        // ERC-20 spend needs an approval before the router can pull funds.
+        // ERC-20 spend needs an approval before the route's contract can
+        // pull funds. LI.FI names the exact address to approve — it is
+        // often not the same contract the transaction itself is sent to.
         if (!quote.spendIsNative) {
           const allowanceContract = new Contract(
             quote.spendContractAddress!,
             ERC20_APPROVE_ABI,
             chain.getProvider(network),
           );
-          const currentAllowance: bigint = await allowanceContract.allowance!(fromAddress, routerAddress);
+          const currentAllowance: bigint = await allowanceContract.allowance!(
+            fromAddress,
+            quote.approvalAddress,
+          );
 
           if (currentAllowance < quote.amountInRaw) {
             const approveIface = new Contract(quote.spendContractAddress!, ERC20_APPROVE_ABI).interface;
             const approveRequest = {
               to: getAddress(quote.spendContractAddress!),
-              data: approveIface.encodeFunctionData('approve', [routerAddress, quote.amountInRaw]),
+              data: approveIface.encodeFunctionData('approve', [quote.approvalAddress, quote.amountInRaw]),
               value: 0n,
             };
             const approveFee = await chain.estimateFee(network, approveRequest, fromAddress);
@@ -480,35 +466,16 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
               action: 'buy.approve',
               entity: 'TransactionRecord',
               entityId: record.id,
-              after: { txHash: approveResponse.hash, spender: routerAddress },
+              after: { txHash: approveResponse.hash, spender: quote.approvalAddress },
             });
           }
         }
 
-        const routerIface = new Contract(routerAddress, PANCAKE_V2_ROUTER_ABI).interface;
-
-        const swapRequest = quote.spendIsNative
-          ? {
-              to: getAddress(routerAddress),
-              data: routerIface.encodeFunctionData('swapExactETHForTokens', [
-                quote.amountOutMin,
-                quote.path,
-                fromAddress,
-                deadline,
-              ]),
-              value: quote.amountInRaw,
-            }
-          : {
-              to: getAddress(routerAddress),
-              data: routerIface.encodeFunctionData('swapExactTokensForTokens', [
-                quote.amountInRaw,
-                quote.amountOutMin,
-                quote.path,
-                fromAddress,
-                deadline,
-              ]),
-              value: 0n,
-            };
+        const swapRequest = {
+          to: quote.transactionRequest.to,
+          data: quote.transactionRequest.data,
+          value: BigInt(quote.transactionRequest.value),
+        };
 
         const swapFee = await chain.estimateFee(network, swapRequest, fromAddress);
         const swapNonce = await chain.getPendingNonce(network, fromAddress);

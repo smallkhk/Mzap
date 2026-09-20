@@ -122,7 +122,7 @@ export interface BuyQuote {
   marketAmountOutDisplay: string;
   buyerAmountOutDisplay: string;
   markupBps: number;
-  executesVia: 'pancakeswap';
+  executesVia: 'lifi';
   comparisons: { source: string; amountOutDisplay: string }[];
   expiresInSeconds: number;
 }

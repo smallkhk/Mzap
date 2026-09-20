@@ -56,7 +56,7 @@ export function GenerateTokensPage() {
           <h2>Generate tokens</h2>
           <p className="muted">
             Buy a token by contract address, using your own deposit wallet. Rates are compared
-            across PancakeSwap, 1inch and LI.FI; the purchase executes via PancakeSwap.
+            against 1inch; the purchase executes via LI.FI.
           </p>
         </div>
       </div>

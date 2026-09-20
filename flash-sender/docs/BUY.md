@@ -22,24 +22,29 @@ Same two-phase shape as sending, for the same reason:
 prepare (quote)                              execute (confirm)
   │                                             │
   ├─ verify the token is a real contract        ├─ re-verify chain id
-  │  (decimals(), symbol() read live —          ├─ approve the router, if the
-  │   never trusted from the pasted address)    │  spend asset is a token
-  ├─ check the spending wallet's real balance    ├─ swap via PancakeSwap V2
-  ├─ quote PancakeSwap (on-chain), 1inch and     ├─ read the token balance
-  │  LI.FI (both HTTP APIs) in parallel         │  before/after to find the
-  ├─ store the route + a 1% slippage floor,     │  *actual* amount received
-  │  referenced by an opaque id                 ├─ (customer buys only) send
-  └─ show the comparison + what the buyer        │  the markup cut on-chain
-     will actually receive                       └─ to the profit address
+  │  (decimals(), symbol() read live —          ├─ approve LI.FI's named
+  │   never trusted from the pasted address)    │  contract, if the spend
+  ├─ check the spending wallet's real balance    │  asset is a token
+  ├─ quote LI.FI (its own route + an already-    ├─ sign and broadcast LI.FI's
+  │  ready transaction to sign) and 1inch        │  own transactionRequest —
+  │  (a second, independent quote) in parallel   │  never hand-built calldata
+  ├─ store the route + an extra 1% slippage      ├─ read the token balance
+  │  floor under LI.FI's own, by an opaque id    │  before/after to find the
+  └─ show the comparison + what the buyer         │  *actual* amount received
+     will actually receive                       ├─ (customer buys only) send
+                                                   │  the markup cut on-chain
+                                                   └─ to the profit address
 ```
 
-Execution only ever goes through **PancakeSwap**. 1inch and LI.FI are real,
-independently-fetched quotes — genuine numbers, not estimates — shown so the
-buyer sees an honest comparison, but their calldata is never signed. Routing
-a signed transaction through a third-party aggregator's returned calldata is
-a materially larger trust surface than a router call this app fully controls
-and can reason about; that's a real feature to add later, not something to
-build without giving it its own scrutiny.
+Execution goes through **LI.FI**. It aggregates across many underlying
+on-chain routers and picks whichever actually has a working, liquid route
+for the pair — a single fixed router misses real tokens it has no pair for,
+which is exactly the failure mode a fixed-router design ran into. This app
+never hand-builds swap calldata: it signs and broadcasts LI.FI's own
+`transactionRequest` for the route it quoted, unmodified, after re-estimating
+gas itself immediately before signing — the `to` and `data` are never edited,
+only decided whether to sign. 1inch is queried too, as a second, independent
+quote for comparison; it is never used to execute.
 
 `execute` takes only a reference to the quote, never the amount or token
 again — exactly like `send/confirm` — so a tampered client cannot change what
@@ -128,6 +133,19 @@ worth being precise about what's checked and what isn't:
   address against the project's own site or a block explorer before buying,
   the same discipline as checking a send recipient — this app verifies the
   contract *shape*, never the *identity* someone claims for it.
+
+**No mainstream route is itself a signal — read it.** A well-known token
+(the real USDT, the real BNB) has liquidity on more than one aggregator; a
+route that exists on LI.FI through some obscure underlying tool but nowhere
+else is exactly the profile of a token that no real market maker has ever
+touched. Before trusting a symbol, check the contract's actual name and
+symbol strings character by character — a common trick is spelling "USDT"
+using look-alike characters from other alphabets (Armenian Ս/Տ, Cyrillic е,
+Lisu ꓔ and similar are common stand-ins for U/S/T/e) so it reads as the real
+thing in a token list while being an entirely different, unrelated contract.
+`cast 4byte`, a block explorer's own token page, or just pasting the decoded
+bytes through Python's `repr()` will show this immediately; the dashboard
+does not do this check for you.
 
 ---
 
