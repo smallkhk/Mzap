@@ -3,6 +3,7 @@ import { config } from './config';
 import { logger } from './lib/logger';
 import { prisma } from './lib/db';
 import * as serverWallet from './services/serverWallet';
+import * as buyWallet from './services/buyWallet';
 import { resumePending } from './services/sendService';
 
 async function main() {
@@ -12,6 +13,7 @@ async function main() {
   // hard failure: better to refuse to start than to run a sending service
   // that cannot sign.
   await serverWallet.initialise();
+  await buyWallet.initialise();
 
   const app = createApp();
   const server = app.listen(config.PORT, config.HOST, () => {
@@ -38,6 +40,7 @@ async function main() {
     logger.info({ signal }, 'Shutting down');
     server.close(() => undefined);
     serverWallet.lock();
+    buyWallet.lock();
     await prisma.$disconnect();
     process.exit(0);
   };

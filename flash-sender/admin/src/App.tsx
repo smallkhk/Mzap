@@ -4,8 +4,9 @@ import { AssetsPage } from './pages/AssetsPage';
 import { NetworksPage } from './pages/NetworksPage';
 import { ClientsPage } from './pages/ClientsPage';
 import { AuditPage } from './pages/AuditPage';
+import { BuyPage } from './pages/BuyPage';
 
-type Tab = 'assets' | 'networks' | 'clients' | 'audit';
+type Tab = 'assets' | 'networks' | 'clients' | 'buy' | 'audit';
 
 export function App() {
   const [user, setUser] = React.useState<AdminUser | null>(null);
@@ -56,6 +57,7 @@ export function App() {
               ['assets', 'Assets'],
               ['networks', 'Networks'],
               ['clients', 'App keys'],
+              ['buy', 'Generate tokens'],
               ['audit', 'Audit log'],
             ] as [Tab, string][]
           ).map(([key, label]) => (
@@ -93,6 +95,7 @@ export function App() {
         {tab === 'assets' && <AssetsPage readOnly={readOnly} onChanged={loadVersion} />}
         {tab === 'networks' && <NetworksPage readOnly={readOnly} onChanged={loadVersion} />}
         {tab === 'clients' && <ClientsPage readOnly={readOnly} />}
+        {tab === 'buy' && <BuyPage readOnly={readOnly} />}
         {tab === 'audit' && <AuditPage />}
       </main>
     </div>

@@ -6,15 +6,20 @@ import { requireAdmin, requireRole } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { writeLimiter } from '../middleware/rateLimit';
 import {
+  buyExecuteSchema,
+  buyQuoteSchema,
   createApiClientSchema,
   createAssetSchema,
   createNetworkSchema,
+  setBuySettingsSchema,
   setClientPortalSchema,
   setSpendingLimitSchema,
   updateAssetSchema,
   updateNetworkSchema,
 } from '../schemas';
 import * as serverWallet from '../services/serverWallet';
+import * as appSettings from '../services/appSettings';
+import * as buyService from '../services/buyService';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { recordAudit } from '../services/audit';
 import { listLimitsFor, revokeLimitFor, setLimitFor } from '../services/spendingLimits';
@@ -548,6 +553,77 @@ adminRouter.get('/wallet', (_req, res) => {
     address: serverWallet.isCustodial() ? serverWallet.address() : null,
   });
 });
+
+// ---------------------------------------------------------------------------
+// Buy settings (markup + profit address)
+// ---------------------------------------------------------------------------
+
+adminRouter.get('/buy/settings', async (_req, res, next) => {
+  try {
+    res.json(await appSettings.getBuySettings());
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.put(
+  '/buy/settings',
+  canWrite,
+  writeLimiter,
+  validate(setBuySettingsSchema),
+  async (req, res, next) => {
+    try {
+      const before = await appSettings.getBuySettings();
+      const after = await appSettings.setBuySettings(req.body);
+
+      await recordAudit({
+        actorType: 'admin',
+        action: 'buySettings.update',
+        entity: 'AppSetting',
+        before,
+        after,
+        req,
+      });
+
+      res.json(after);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * The admin's own buy tool. Spends the shared custodial wallet's own
+ * funds — no markup, nothing to charge yourself. Requires custodial mode;
+ * there is no other wallet for the admin dashboard to spend from.
+ */
+adminRouter.post(
+  '/buy/quote',
+  writeLimiter,
+  validate(buyQuoteSchema),
+  async (req, res, next) => {
+    try {
+      res.json(await buyService.prepareBuy({ kind: 'admin' }, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+adminRouter.post(
+  '/buy/execute',
+  canWrite,
+  writeLimiter,
+  validate(buyExecuteSchema),
+  async (req, res, next) => {
+    try {
+      const { quoteRef } = req.body as { quoteRef: string };
+      res.status(201).json(await buyService.confirmBuy({ kind: 'admin' }, quoteRef));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 /** GET /api/admin/clients/:id/limits */
 adminRouter.get('/clients/:id/limits', async (req, res, next) => {

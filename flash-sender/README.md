@@ -137,6 +137,7 @@ amount transferred by orders of magnitude.
 | [`docs/CPANEL.md`](docs/CPANEL.md) | Step-by-step cPanel deployment (shared hosting). |
 | [`docs/CUSTODIAL.md`](docs/CUSTODIAL.md) | Running one shared sending wallet on the backend, and its trade-offs. |
 | [`docs/PORTAL.md`](docs/PORTAL.md) | Giving one customer a self-service panel scoped to their own key. |
+| [`docs/BUY.md`](docs/BUY.md) | "Generate tokens" — buying a token via PancakeSwap, with quotes compared against 1inch and LI.FI, and an optional markup for customer buys. |
 | [`docs/API.md`](docs/API.md) | Full endpoint reference. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, key handling, what is and isn't protected. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module layout and the send pipeline. |

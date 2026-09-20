@@ -302,3 +302,34 @@ export const setSpendingLimitSchema = z.object({
   maxPerDay: z.string().min(1).max(80),
   enabled: z.boolean().default(true),
 });
+
+// ---------------------------------------------------------------------------
+// Buy / swap
+// ---------------------------------------------------------------------------
+
+/**
+ * Basis points, capped at 5000 (50%) — not because a higher number is
+ * unsafe to store, but because anything past that is almost certainly a
+ * typo (2500 meant as "25%" entered as "2500%") and worth refusing rather
+ * than silently taking effect on the next customer buy.
+ */
+export const setBuySettingsSchema = z.object({
+  buyMarkupBps: z.number().int().min(0).max(5000).optional(),
+  profitAddress: addressSchema.nullish(),
+});
+
+export const buyQuoteSchema = z.object({
+  spendAssetId: slugSchema,
+  tokenAddress: addressSchema,
+  amountIn: z.string().min(1).max(80),
+});
+
+/**
+ * Confirm carries only the reference, exactly like the send pipeline's
+ * `confirm(clientRef)`. Everything that was shown — amount, token, route,
+ * minimum output — is what gets executed, because it's re-read from the
+ * server-held quote rather than re-submitted by the caller.
+ */
+export const buyExecuteSchema = z.object({
+  quoteRef: z.string().uuid(),
+});

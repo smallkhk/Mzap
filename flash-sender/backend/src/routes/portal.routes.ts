@@ -4,12 +4,19 @@ import { prisma } from '../lib/db';
 import { requirePortalClient } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { writeLimiter } from '../middleware/rateLimit';
-import { portalCreateAssetSchema, setSpendingLimitSchema } from '../schemas';
+import {
+  buyExecuteSchema,
+  buyQuoteSchema,
+  portalCreateAssetSchema,
+  setSpendingLimitSchema,
+} from '../schemas';
 import { badRequest, conflict } from '../lib/errors';
 import { recordAudit } from '../services/audit';
 import { bumpConfigVersion } from '../services/configVersion';
 import { serializeAsset, serializeNetwork } from '../services/serialize';
 import * as serverWallet from '../services/serverWallet';
+import * as buyWallet from '../services/buyWallet';
+import * as buyService from '../services/buyService';
 import { listLimitsFor, revokeLimitFor, setLimitFor } from '../services/spendingLimits';
 
 /**
@@ -68,6 +75,8 @@ portalRouter.get('/me', (req, res) => {
     createdAt: client.createdAt.toISOString(),
     custodial: serverWallet.isCustodial(),
     address: serverWallet.isCustodial() ? serverWallet.address() : null,
+    buyEnabled: buyWallet.isEnabled(),
+    buyWalletAddress: client.buyWalletAddress,
   });
 });
 
@@ -195,4 +204,52 @@ portalRouter.delete('/limits/:assetId', writeLimiter, async (req, res, next) => 
     return next(err);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Buy / "Generate tokens" — this client's own deposit wallet
+// ---------------------------------------------------------------------------
+
+/**
+ * Idempotent: returns the existing address if one was already generated,
+ * otherwise derives and assigns the next one. Never a route that could
+ * hand back someone else's wallet — the address is always this client's
+ * own, because `req.client` is the only identity this router ever sees.
+ */
+portalRouter.get('/buy/wallet', async (req, res, next) => {
+  try {
+    const address = await buyWallet.ensureWalletFor(req.client!.id);
+    res.json({ address });
+  } catch (err) {
+    next(err);
+  }
+});
+
+portalRouter.post(
+  '/buy/quote',
+  writeLimiter,
+  validate(buyQuoteSchema),
+  async (req, res, next) => {
+    try {
+      const client = req.client!;
+      res.json(await buyService.prepareBuy({ kind: 'client', client }, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+portalRouter.post(
+  '/buy/execute',
+  writeLimiter,
+  validate(buyExecuteSchema),
+  async (req, res, next) => {
+    try {
+      const client = req.client!;
+      const { quoteRef } = req.body as { quoteRef: string };
+      res.status(201).json(await buyService.confirmBuy({ kind: 'client', client }, quoteRef));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 

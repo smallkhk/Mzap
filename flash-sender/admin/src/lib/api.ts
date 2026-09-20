@@ -182,6 +182,35 @@ export interface SpendingLimit {
   enabled: boolean;
 }
 
+export interface BuySettings {
+  buyMarkupBps: number;
+  profitAddress: string | null;
+}
+
+export interface BuyQuote {
+  quoteRef: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  tokenDecimals: number;
+  spendSymbol: string;
+  amountInDisplay: string;
+  marketAmountOutDisplay: string;
+  buyerAmountOutDisplay: string;
+  markupBps: number;
+  executesVia: 'pancakeswap';
+  comparisons: { source: string; amountOutDisplay: string }[];
+  expiresInSeconds: number;
+}
+
+export interface BuyResult {
+  id: string;
+  txHash: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  creditedDisplay: string;
+  explorerUrl: string;
+}
+
 export interface AuditEntry {
   id: string;
   actorType: string;
@@ -278,5 +307,17 @@ export const api = {
 
   transactions: {
     list: () => raw<{ transactions: Record<string, unknown>[] }>('/api/admin/transactions?limit=200'),
+  },
+
+  buy: {
+    settings: () => raw<BuySettings>('/api/admin/buy/settings'),
+    setSettings: (data: Partial<BuySettings>) =>
+      raw<BuySettings>('/api/admin/buy/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+    /** Spends the shared wallet's own funds — no markup, since there's no one to charge. */
+    quote: (data: { spendAssetId: string; tokenAddress: string; amountIn: string }) =>
+      raw<BuyQuote>('/api/admin/buy/quote', { method: 'POST', body: JSON.stringify(data) }),
+    execute: (quoteRef: string) =>
+      raw<BuyResult>('/api/admin/buy/execute', { method: 'POST', body: JSON.stringify({ quoteRef }) }),
   },
 };

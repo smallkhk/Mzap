@@ -89,6 +89,15 @@ model ApiClient {
   /// portal login.
   portalEnabled Boolean @default(false)
 
+  /// This client's own deposit address for buying tokens, derived once from
+  /// the buy-wallet seed at a deterministic index — never a freshly generated,
+  /// independently stored key. `buyWalletIndex` is what actually determines
+  /// the address (assigned once, immutable); `buyWalletAddress` is a cache of
+  /// what that index derives to, kept only so it can be displayed and queried
+  /// without unlocking the seed on every read.
+  buyWalletIndex   Int?    @unique
+  buyWalletAddress String? @unique
+
   transactions   TransactionRecord[]
   spendingLimits SpendingLimit[]
 
@@ -191,6 +200,38 @@ model ConfigVersion {
   updatedAt DateTime @updatedAt
 
   @@map("config_version")
+}
+
+/// Single-row table holding admin-editable settings for the buy/swap feature
+/// — markup and where its profit goes. A DB row rather than an env var
+/// deliberately: it changes from the dashboard, without a redeploy.
+///
+/// `buyMarkupBps` only ever affects a *customer's* own buy (portal), where it
+/// is the whole point of the feature. It has no bearing on the admin
+/// dashboard's own buy tool, which spends the shared wallet's own funds —
+/// there is no one to charge a markup to.
+model AppSetting {
+  id Int @id @default(1)
+
+  /// Markup in basis points (1/100 of a percent). 250 = 2.5%. A customer buy
+  /// is credited raw_output * (10000 - buyMarkupBps) / 10000; the remainder
+  /// is sent to profitAddress from the same swap.
+  buyMarkupBps Int @default(0)
+
+  /// Where markup profit is sent. Null means markup is effectively disabled
+  /// even if buyMarkupBps is nonzero — there is deliberately no fallback
+  /// destination, so a swap can never skim funds to nowhere.
+  profitAddress String?
+
+  /// Next derivation index to hand out for a client's buy wallet. Read and
+  /// incremented inside one transaction when a client is first assigned one,
+  /// so two concurrent "generate wallet" calls can never receive the same
+  /// index.
+  nextBuyWalletIndex Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
 }
 
 // ---------------------------------------------------------------------------

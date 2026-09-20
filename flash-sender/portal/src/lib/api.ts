@@ -108,6 +108,32 @@ export interface Account {
   createdAt: string;
   custodial: boolean;
   address: string | null;
+  buyEnabled: boolean;
+  buyWalletAddress: string | null;
+}
+
+export interface BuyQuote {
+  quoteRef: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  tokenDecimals: number;
+  spendSymbol: string;
+  amountInDisplay: string;
+  marketAmountOutDisplay: string;
+  buyerAmountOutDisplay: string;
+  markupBps: number;
+  executesVia: 'pancakeswap';
+  comparisons: { source: string; amountOutDisplay: string }[];
+  expiresInSeconds: number;
+}
+
+export interface BuyResult {
+  id: string;
+  txHash: string;
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  creditedDisplay: string;
+  explorerUrl: string;
 }
 
 export interface Network {
@@ -127,6 +153,7 @@ export interface Asset {
   contractAddress: string | null;
   decimals: number;
   isNative: boolean;
+  enabled: boolean;
 }
 
 export interface SpendingLimit {
@@ -172,5 +199,14 @@ export const api = {
       raw<{ revoked: boolean }>(`/api/portal/limits/${encodeURIComponent(assetId)}`, {
         method: 'DELETE',
       }),
+  },
+
+  buy: {
+    /** Idempotent: returns the existing address, or generates and assigns one. */
+    wallet: () => raw<{ address: string }>('/api/portal/buy/wallet'),
+    quote: (data: { spendAssetId: string; tokenAddress: string; amountIn: string }) =>
+      raw<BuyQuote>('/api/portal/buy/quote', { method: 'POST', body: JSON.stringify(data) }),
+    execute: (quoteRef: string) =>
+      raw<BuyResult>('/api/portal/buy/execute', { method: 'POST', body: JSON.stringify({ quoteRef }) }),
   },
 };

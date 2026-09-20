@@ -2,8 +2,9 @@ import React from 'react';
 import { api, type Account, ApiError, isSignedIn, signIn, signOut } from './lib/api';
 import { TokensPage } from './pages/TokensPage';
 import { LimitsPage } from './pages/LimitsPage';
+import { GenerateTokensPage } from './pages/GenerateTokensPage';
 
-type Tab = 'limits' | 'tokens';
+type Tab = 'limits' | 'tokens' | 'buy';
 
 export function App() {
   const [account, setAccount] = React.useState<Account | null>(null);
@@ -42,6 +43,7 @@ export function App() {
             [
               ['limits', 'My sending limits'],
               ['tokens', 'My tokens'],
+              ...(account.buyEnabled ? ([['buy', 'Generate tokens']] as [Tab, string][]) : []),
             ] as [Tab, string][]
           ).map(([key, label]) => (
             <button
@@ -80,6 +82,7 @@ export function App() {
 
         {tab === 'limits' && <LimitsPage />}
         {tab === 'tokens' && <TokensPage />}
+        {tab === 'buy' && account.buyEnabled && <GenerateTokensPage />}
       </main>
     </div>
   );

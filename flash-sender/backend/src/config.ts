@@ -48,6 +48,22 @@ const schema = z.object({
   WALLET_VAULT_PATH: z.string().optional(),
   WALLET_PASSPHRASE: z.string().min(16).optional(),
 
+  /// Buy-wallet seed, for the "Generate tokens" feature. A separate secret
+  /// from the shared custodial wallet above: this one derives one deposit
+  /// address per portal-enabled customer, rather than being a single shared
+  /// address. Absent means the buy feature is simply disabled.
+  BUY_WALLET_VAULT_PATH: z.string().optional(),
+  BUY_WALLET_PASSPHRASE: z.string().min(16).optional(),
+
+  /// Optional API key for the 1inch aggregator, used only as an additional
+  /// quote source when comparing buy prices. Quotes work without it — this
+  /// source is just skipped.
+  ONEINCH_API_KEY: z.string().optional(),
+
+  /// Optional API key for LI.FI, another optional quote source. LI.FI's
+  /// basic quote endpoint works without a key; this raises its rate limit.
+  LIFI_API_KEY: z.string().optional(),
+
   /// Optional path to the built admin dashboard (admin/dist). When set, the
   /// dashboard is served from this same process and origin — which removes
   /// the CORS configuration entirely and means one domain and one TLS
