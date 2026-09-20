@@ -84,6 +84,15 @@ const NATIVE_PSEUDO_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 // margin this app applies on top, not a replacement for it.
 const SLIPPAGE_BPS = 100n; // 1%
 
+// The real, verified USDT deployment — not just any asset a dashboard admin
+// might have labeled "USDT". Checked against both a live on-chain symbol()
+// read and LI.FI's own curated token list before being hardcoded here.
+// Deliberately scoped to BNB Smart Chain only; buying rejects USDT spends on
+// any other chain until a verified address is added for it.
+const REAL_USDT_ADDRESS: Record<number, string> = {
+  56: '0x55d398326f99059fF775485246999027B3197955', // BNB Smart Chain
+};
+
 interface LifiQuote {
   amountOutRaw: bigint;
   amountOutMinRaw: bigint;
@@ -268,15 +277,25 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     throw badRequest('UNKNOWN_ASSET', `No asset with id "${input.spendAssetId}".`);
   }
 
-  // Buying is deliberately restricted to the chain's native coin or USDT —
-  // not any asset that happens to be in the catalog. Enforced here, not
-  // just hidden in the picker, so it can't be bypassed by calling the API
-  // directly with a different spendAssetId.
-  if (!spendAsset.isNative && spendAsset.symbol.toUpperCase() !== 'USDT') {
-    throw badRequest(
-      'UNSUPPORTED_SPEND_ASSET',
-      `Buying only accepts ${spendAsset.network.nativeSymbol} or USDT to spend, not ${spendAsset.symbol}.`,
-    );
+  // Buying is deliberately restricted to the chain's native coin or the
+  // real, verified USDT contract — never just any asset row labeled "USDT"
+  // in the catalog. A dashboard asset's symbol is whatever whoever added it
+  // typed in; trusting that string alone would let a mislabeled or outright
+  // fake contract spend as if it were USDT. Checked against the actual
+  // contract address instead, so this can't be bypassed by adding a
+  // differently-addressed asset and calling the API directly.
+  if (!spendAsset.isNative) {
+    const realUsdt = REAL_USDT_ADDRESS[spendAsset.network.chainId];
+    const isRealUsdt =
+      realUsdt !== undefined &&
+      spendAsset.contractAddress !== null &&
+      getAddress(spendAsset.contractAddress) === getAddress(realUsdt);
+    if (!isRealUsdt) {
+      throw badRequest(
+        'UNSUPPORTED_SPEND_ASSET',
+        `Buying only accepts ${spendAsset.network.nativeSymbol} or the real USDT contract to spend, not ${spendAsset.symbol}.`,
+      );
+    }
   }
 
   const fromAddress = await resolveFromAddress(identity);
