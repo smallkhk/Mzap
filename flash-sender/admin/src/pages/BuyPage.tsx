@@ -83,6 +83,27 @@ export function BuyPage({ readOnly }: { readOnly: boolean }) {
   );
 }
 
+/**
+ * The fee is stored and enforced as basis points of the spend amount (the
+ * backend's own unit — see buyService.ts), but "take 66.67% off the top" is
+ * an awkward way for an admin to think about pricing. "Charge 3x the real
+ * rate" is the same number expressed the way it's actually decided: a
+ * multiplier of M means only 1/M of what's spent gets swapped, so the
+ * customer pays M times what their credited amount actually cost.
+ *   M = 1   → 0% fee   (charge exactly the real rate)
+ *   M = 2   → 50% fee  (charge double)
+ *   M = 3   → 66.67% fee (charge triple)
+ * The conversion is exact in both directions; only the input changes.
+ */
+function bpsToMultiplier(bps: number): number {
+  if (bps >= 10_000) return Infinity;
+  return 10_000 / (10_000 - bps);
+}
+function multiplierToBps(multiplier: number): number {
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return 0;
+  return Math.max(0, Math.min(10_000, Math.round((1 - 1 / multiplier) * 10_000)));
+}
+
 function BuySettingsCard({
   settings,
   onSaved,
@@ -90,7 +111,7 @@ function BuySettingsCard({
   settings: BuySettings;
   onSaved: (s: BuySettings) => void;
 }) {
-  const [markupPercent, setMarkupPercent] = React.useState((settings.buyMarkupBps / 100).toString());
+  const [multiplier, setMultiplier] = React.useState(bpsToMultiplier(settings.buyMarkupBps).toString());
   const [profitAddress, setProfitAddress] = React.useState(settings.profitAddress ?? '');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -102,12 +123,17 @@ function BuySettingsCard({
     setError(null);
     setSaved(false);
     try {
-      const bps = Math.round(Number(markupPercent) * 100);
+      const m = Number(multiplier);
+      if (!Number.isFinite(m) || m < 1) {
+        throw new ApiError('INVALID_MULTIPLIER', 'Enter a multiplier of 1 or higher — 1 means no markup.');
+      }
+      const bps = multiplierToBps(m);
       const next = await api.buy.setSettings({
         buyMarkupBps: bps,
         profitAddress: profitAddress.trim() || null,
       });
       onSaved(next);
+      setMultiplier(bpsToMultiplier(next.buyMarkupBps).toString());
       setSaved(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save.');
@@ -133,15 +159,18 @@ function BuySettingsCard({
       <form onSubmit={submit} style={{ display: 'grid', gap: 12, maxWidth: 480 }}>
         <div className="grid-2">
           <label className="field">
-            <span>Markup</span>
+            <span>Charge multiplier</span>
             <input
               className="input"
               inputMode="decimal"
-              placeholder="2.5"
-              value={markupPercent}
-              onChange={(e) => setMarkupPercent(e.target.value)}
+              placeholder="3"
+              value={multiplier}
+              onChange={(e) => setMultiplier(e.target.value)}
             />
-            <small className="faint">Percent, e.g. 2.5 for 2.5%.</small>
+            <small className="faint">
+              1 = no markup, 3 = charge 3x the real rate ({multiplierToBps(Number(multiplier) || 1) / 100}%
+              fee).
+            </small>
           </label>
           <label className="field">
             <span>Profit address</span>

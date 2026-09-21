@@ -138,7 +138,9 @@ one more leg alongside the approve, the swap, and the markup skim; see
 
 ## Markup and the profit address
 
-Set from the admin dashboard's **Generate tokens** tab, or:
+Set from the admin dashboard's **Generate tokens** tab — as a **charge
+multiplier** there (3 means "charge 3x the real rate"), converted for you
+into the API's own unit — or directly:
 
 ```bash
 curl -X PUT https://send.example.com/api/admin/buy/settings \
@@ -146,7 +148,11 @@ curl -X PUT https://send.example.com/api/admin/buy/settings \
   -d '{"buyMarkupBps": 250, "profitAddress": "0x…"}'
 ```
 
-`buyMarkupBps` is basis points — 250 = 2.5%. A markup with **no** profit
+`buyMarkupBps` is basis points of the *spend* amount taken as a fee — 250 =
+2.5%. A multiplier and a percentage describe the same number two ways: a 3x
+multiplier is exactly a 66.67% fee (swap 1/3 of what was spent, so the
+credited amount cost 3x what it would have at the real rate); multiplier M
+converts to `round((1 - 1/M) × 10000)` basis points. A markup with **no** profit
 address does nothing: there is deliberately no fallback destination, so a
 buy can never skim funds to nowhere. Set both together, or neither.
 
