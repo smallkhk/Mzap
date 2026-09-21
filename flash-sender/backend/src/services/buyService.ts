@@ -92,6 +92,15 @@ const NATIVE_PSEUDO_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 // margin this app applies on top, not a replacement for it.
 const SLIPPAGE_BPS = 100n; // 1%
 
+// How much price impact LI.FI is told it may accept when deciding whether a
+// route is viable at all. This is a search parameter, not a safety margin —
+// SLIPPAGE_BPS above still applies to whatever actually executes, on top of
+// whatever this is set to. A tight value here silently returns *zero*
+// routes for a thin-liquidity pair (most meme coins) rather than a worse
+// quote; loosened so those tokens actually get a route to compare, matching
+// what a request-side slippage more suited to that reality looks like.
+const LIFI_REQUEST_SLIPPAGE = 0.05; // 5%
+
 // The real, verified USDT deployment — not just any asset a dashboard admin
 // might have labeled "USDT". Checked against both a live on-chain symbol()
 // read and LI.FI's own curated token list before being hardcoded here. This
@@ -152,7 +161,7 @@ async function quoteLifi(
         fromAmount: amountIn.toString(),
         fromAddress,
         toAddress: fromAddress, // the purchase lands back in the funding wallet
-        options: { integrator: 'flash-sender', slippage: 0.01, order: 'RECOMMENDED' },
+        options: { integrator: 'flash-sender', slippage: LIFI_REQUEST_SLIPPAGE, order: 'RECOMMENDED' },
       }),
       signal: AbortSignal.timeout(15_000),
     });
