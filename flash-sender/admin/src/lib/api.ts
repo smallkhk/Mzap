@@ -194,7 +194,10 @@ export interface BuyQuote {
   tokenDecimals: number;
   spendSymbol: string;
   amountInDisplay: string;
-  marketAmountOutDisplay: string;
+  /** The fee, in the spend asset, taken before swapping — 0 unless a markup and a profit address are both set. */
+  feeAmountDisplay: string;
+  /** amountInDisplay minus feeAmountDisplay — what's actually swapped. */
+  swapAmountDisplay: string;
   buyerAmountOutDisplay: string;
   markupBps: number;
   executesVia: 'lifi';

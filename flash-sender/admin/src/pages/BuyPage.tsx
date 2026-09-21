@@ -121,9 +121,10 @@ function BuySettingsCard({
       <h3 style={{ marginTop: 0, fontSize: 15 }}>Buy settings</h3>
       <p className="muted" style={{ fontSize: 12.5, marginTop: -4 }}>
         Applies only to customer buys in the portal. This markup is real, not a display number:
-        when a customer buys, they are credited the amount below the market rate, and the
-        difference is sent on-chain to the profit address. Leaving the profit address empty
-        disables the skim even if a markup is set — a swap never sends funds to nowhere.
+        it's taken from the USDT or BNB a customer spends, before the swap happens, and sent
+        on-chain to the profit address — the customer keeps 100% of whatever the token side
+        actually returns. Leaving the profit address empty disables the fee even if a markup is
+        set — a swap never sends funds to nowhere.
       </p>
 
       {error && <div className="alert alert--danger">{error}</div>}
@@ -318,9 +319,10 @@ export function BuyForm({
 
           {quote.markupBps > 0 && (
             <div className="alert alert--warn" style={{ margin: 0 }}>
-              Market rate would give {quote.marketAmountOutDisplay} {quote.tokenSymbol}. You are
-              credited {quote.buyerAmountOutDisplay} after the {(quote.markupBps / 100).toFixed(2)}%
-              markup.
+              A {(quote.markupBps / 100).toFixed(2)}% fee — {quote.feeAmountDisplay} {quote.spendSymbol} —
+              is taken from the spend amount before swapping. {quote.swapAmountDisplay} {quote.spendSymbol}{' '}
+              actually gets swapped; you're credited the full {quote.buyerAmountOutDisplay}{' '}
+              {quote.tokenSymbol} that comes back, none of it skimmed.
             </div>
           )}
 

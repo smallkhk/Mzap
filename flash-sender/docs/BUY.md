@@ -27,21 +27,23 @@ Same two-phase shape as sending, for the same reason:
 prepare (quote)                              execute (confirm)
   │                                             │
   ├─ verify the token is a real contract        ├─ re-verify chain id
-  │  (decimals(), symbol() read live —          ├─ approve LI.FI's named
-  │   never trusted from the pasted address)    │  contract, if the spend
-  ├─ check the spending wallet's real balance    │  asset is a token
-  ├─ ask LI.FI for *every* route it can find      ├─ sign and broadcast LI.FI's
-  │  (Fly, 1inch, Nordstern, whichever on-chain   │  own transactionRequest —
-  │  DEX has liquidity) and pick whichever         │  never hand-built calldata
-  │  actually returns the most, plus a second,    ├─ read the token balance
-  │  independent 1inch quote, in parallel         │  before/after to find the
-  ├─ turn the winning route into an already-       │  *actual* amount received
-  │  ready transaction via LI.FI, store it with   ├─ (customer buys only) send
-  │  an extra 1% slippage floor, by an opaque id   │  the markup cut on-chain
-  └─ show the comparison + what the buyer         │  to the profit address
+  │  (decimals(), symbol() read live —          ├─ (customer buys only) send
+  │   never trusted from the pasted address)    │  the fee, straight from the
+  ├─ check the spending wallet's real balance    │  spend asset, to the
+  ├─ (customer buys only) take the markup        │  profit address
+  │  off the spend amount — this is what's       ├─ approve LI.FI's named
+  │  actually swapped, not the full amount       │  contract, if the spend
+  ├─ ask LI.FI for *every* route it can find      │  asset is a token
+  │  (Fly, 1inch, Nordstern, whichever on-chain   ├─ sign and broadcast LI.FI's
+  │  DEX has liquidity) and pick whichever         │  own transactionRequest —
+  │  actually returns the most, plus a second,    │  never hand-built calldata
+  │  independent 1inch quote, in parallel         ├─ read the token balance
+  ├─ turn the winning route into an already-       │  before/after to find the
+  │  ready transaction via LI.FI, store it with   │  *actual* amount received —
+  │  an extra 1% slippage floor, by an opaque id   │  credited in full, nothing
+  └─ show the comparison + what the buyer          │  skimmed a second time
      will actually receive                        └─ (customer buys only) sweep
-                                                      the rest to the custodial
-                                                      wallet
+                                                      it to the custodial wallet
 ```
 
 Execution goes through **LI.FI**. It aggregates across many underlying
@@ -148,10 +150,15 @@ curl -X PUT https://send.example.com/api/admin/buy/settings \
 address does nothing: there is deliberately no fallback destination, so a
 buy can never skim funds to nowhere. Set both together, or neither.
 
-The skim is computed against what the swap **actually** returned — read from
-the wallet's real balance delta before and after, not the pre-computed quote
-— so a fee-on-transfer token or any other surprise in the swap's real output
-is what gets split, not an estimate.
+**The fee is taken from the spend asset, before the swap runs — not from the
+token that comes back.** A 2.5% markup on a 1 USDT buy sends 0.025 USDT to
+the profit address and swaps the remaining 0.975 USDT; the customer is
+credited 100% of whatever that swap actually returns, none of it skimmed
+afterward. This is deliberate: what the customer is quoted is what they
+get, exactly, with no second deduction hiding in the token they didn't pick
+the price of. The split is computed once, at quote time, and locked into
+that quote — `confirm` moves exactly the fee and swaps exactly the amount
+that was shown, never a live re-read of the current settings.
 
 This only ever applies to the **portal's** buy tool. The admin dashboard's
 own buy spends the shared wallet's own money; there is no markup to apply

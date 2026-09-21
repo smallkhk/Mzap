@@ -264,6 +264,11 @@ interface StoredBuyQuote {
   spendDecimals: number;
   spendSymbol: string;
   amountInRaw: bigint;
+  /** The fee (if any) taken from the spend asset before swapping — locked in at quote time, same as everything else here. */
+  feeRaw: bigint;
+  profitAddress: string | null;
+  /** amountInRaw - feeRaw — what actually gets approved and swapped. */
+  swapAmountRaw: bigint;
   tokenAddress: string;
   tokenDecimals: number;
   tokenSymbol: string | null;
@@ -372,10 +377,30 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
 
   const spendPathAddress = spendAsset.isNative ? NATIVE_PSEUDO_ADDRESS : getAddress(spendContractAddress!);
 
-  const [lifi, oneInchOut, buySettings] = await Promise.all([
-    quoteLifi(spendAsset.network.chainId, spendPathAddress, tokenAddress, amountInRaw, fromAddress, config.LIFI_API_KEY),
-    quote1inch(spendAsset.network.chainId, spendPathAddress, tokenAddress, amountInRaw, config.ONEINCH_API_KEY),
-    getBuySettings(),
+  // The markup, when one applies, is taken from the spend asset itself —
+  // USDT or BNB actually going in — before any swap happens, never skimmed
+  // from the token that comes back out. "Leaving the profit address empty
+  // disables the skim even if a markup is set" still holds: a fee with
+  // nowhere to send it is simply not taken, and the full amount is swapped.
+  // Locked in here, at quote time, same as the route and the price — confirm
+  // executes exactly this split, not whatever the settings say by then.
+  const buySettings = await getBuySettings();
+  const markupBps = identity.kind === 'client' ? buySettings.buyMarkupBps : 0;
+  const profitAddress = identity.kind === 'client' ? buySettings.profitAddress : null;
+  const feeApplies = markupBps > 0 && profitAddress !== null;
+  const feeRaw = feeApplies ? (amountInRaw * BigInt(markupBps)) / 10_000n : 0n;
+  const swapAmountRaw = amountInRaw - feeRaw;
+
+  if (swapAmountRaw <= 0n) {
+    throw badRequest(
+      'AMOUNT_TOO_SMALL',
+      'After the fee, there would be nothing left to swap. Enter a larger amount.',
+    );
+  }
+
+  const [lifi, oneInchOut] = await Promise.all([
+    quoteLifi(spendAsset.network.chainId, spendPathAddress, tokenAddress, swapAmountRaw, fromAddress, config.LIFI_API_KEY),
+    quote1inch(spendAsset.network.chainId, spendPathAddress, tokenAddress, swapAmountRaw, config.ONEINCH_API_KEY),
   ]);
 
   if (!lifi) {
@@ -402,6 +427,9 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     spendDecimals,
     spendSymbol: spendAsset.symbol,
     amountInRaw,
+    feeRaw,
+    profitAddress,
+    swapAmountRaw,
     tokenAddress,
     tokenDecimals,
     tokenSymbol,
@@ -412,9 +440,6 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     createdAt: Date.now(),
   });
   reapQuotes();
-
-  const markupBps = identity.kind === 'client' ? buySettings.buyMarkupBps : 0;
-  const buyerAmountRaw = lifi.amountOutRaw - (lifi.amountOutRaw * BigInt(markupBps)) / 10_000n;
 
   const comparisons: { source: string; amountOutDisplay: string }[] = [
     { source: 'lifi', amountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals) },
@@ -430,8 +455,9 @@ export async function prepareBuy(identity: BuyIdentity, input: PrepareBuyInput) 
     tokenDecimals,
     spendSymbol: spendAsset.symbol,
     amountInDisplay: formatAmount(amountInRaw, spendDecimals),
-    marketAmountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals),
-    buyerAmountOutDisplay: formatAmount(buyerAmountRaw, tokenDecimals),
+    feeAmountDisplay: formatAmount(feeRaw, spendDecimals),
+    swapAmountDisplay: formatAmount(swapAmountRaw, spendDecimals),
+    buyerAmountOutDisplay: formatAmount(lifi.amountOutRaw, tokenDecimals),
     markupBps,
     executesVia: 'lifi' as const,
     executionTool: lifi.toolName,
@@ -506,6 +532,53 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
   try {
     const tokenBefore = await chain.getTokenBalance(network, quote.tokenAddress, fromAddress);
 
+    // The fee, when one applies, is taken from the spend asset itself —
+    // before the swap, not skimmed from what the swap returns — so it has
+    // to move first, while the wallet's spend-asset balance still covers it.
+    let feeTxHash: string | null = null;
+    if (quote.feeRaw > 0n && quote.profitAddress) {
+      feeTxHash = await withChainLock(network.chainId, () =>
+        withSigner(identity, async (privateKey) => {
+          const feeRequest = quote.spendIsNative
+            ? { to: getAddress(quote.profitAddress!), data: '0x', value: quote.feeRaw }
+            : {
+                to: getAddress(quote.spendContractAddress!),
+                data: new Contract(quote.spendContractAddress!, [
+                  'function transfer(address to, uint256 amount) returns (bool)',
+                ]).interface.encodeFunctionData('transfer', [quote.profitAddress, quote.feeRaw]),
+                value: 0n,
+              };
+          const fee = await chain.estimateFee(network, feeRequest, fromAddress);
+          const nonce = await chain.getPendingNonce(network, fromAddress);
+
+          const response = await chain.signAndBroadcast(network, privateKey, {
+            ...feeRequest,
+            nonce,
+            gasLimit: fee.gasLimit,
+            ...(fee.maxFeePerGas
+              ? { maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n }
+              : { gasPrice: fee.gasPrice ?? 0n }),
+          });
+          await waitForReceipt(network, response.hash);
+          return response.hash;
+        }),
+      );
+
+      await recordAudit({
+        actorType: 'system',
+        action: 'buy.fee',
+        entity: 'TransactionRecord',
+        entityId: record.id,
+        after: {
+          clientId: identity.kind === 'client' ? identity.client.id : null,
+          spendAssetId: quote.spendAssetId,
+          feeRaw: quote.feeRaw.toString(),
+          feeTxHash,
+          profitAddress: quote.profitAddress,
+        },
+      });
+    }
+
     // Estimated and signed with the same rigor as a plain send: gas is
     // re-estimated fresh right before signing (with the same 20% headroom
     // `chain.estimateFee` applies everywhere else) rather than trusting the
@@ -529,11 +602,11 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
             quote.approvalAddress,
           );
 
-          if (currentAllowance < quote.amountInRaw) {
+          if (currentAllowance < quote.swapAmountRaw) {
             const approveIface = new Contract(quote.spendContractAddress!, ERC20_APPROVE_ABI).interface;
             const approveRequest = {
               to: getAddress(quote.spendContractAddress!),
-              data: approveIface.encodeFunctionData('approve', [quote.approvalAddress, quote.amountInRaw]),
+              data: approveIface.encodeFunctionData('approve', [quote.approvalAddress, quote.swapAmountRaw]),
               value: 0n,
             };
             const approveFee = await chain.estimateFee(network, approveRequest, fromAddress);
@@ -584,66 +657,18 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
     );
 
     const tokenAfter = await chain.getTokenBalance(network, quote.tokenAddress, fromAddress);
+    // The fee already came out of the spend asset, before this swap ran —
+    // there is nothing left to skim from what comes back. The customer is
+    // credited exactly what the swap actually returned.
     const actualReceived = tokenAfter - tokenBefore;
-
-    let profitTxHash: string | null = null;
-    let creditedRaw = actualReceived;
-
-    if (identity.kind === 'client' && actualReceived > 0n) {
-      const settings = await getBuySettings();
-      if (settings.buyMarkupBps > 0 && settings.profitAddress) {
-        const profitCut = (actualReceived * BigInt(settings.buyMarkupBps)) / 10_000n;
-        if (profitCut > 0n) {
-          profitTxHash = await withChainLock(network.chainId, () =>
-            withSigner(identity, async (privateKey) => {
-              const iface = new Contract(quote.tokenAddress, [
-                'function transfer(address to, uint256 amount) returns (bool)',
-              ]).interface;
-              const transferRequest = {
-                to: getAddress(quote.tokenAddress),
-                data: iface.encodeFunctionData('transfer', [settings.profitAddress!, profitCut]),
-                value: 0n,
-              };
-              const fee = await chain.estimateFee(network, transferRequest, fromAddress);
-              const nonce = await chain.getPendingNonce(network, fromAddress);
-
-              const response = await chain.signAndBroadcast(network, privateKey, {
-                ...transferRequest,
-                nonce,
-                gasLimit: fee.gasLimit,
-                ...(fee.maxFeePerGas
-                  ? { maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n }
-                  : { gasPrice: fee.gasPrice ?? 0n }),
-              });
-              await waitForReceipt(network, response.hash);
-              return response.hash;
-            }),
-          );
-          creditedRaw = actualReceived - profitCut;
-
-          await recordAudit({
-            actorType: 'system',
-            action: 'buy.markup.skim',
-            entity: 'TransactionRecord',
-            entityId: record.id,
-            after: {
-              clientId: identity.client.id,
-              tokenAddress: quote.tokenAddress,
-              profitCutRaw: profitCut.toString(),
-              profitTxHash,
-              profitAddress: settings.profitAddress,
-            },
-          });
-        }
-      }
-    }
+    const creditedRaw = actualReceived;
 
     // A customer's purchase lands in their own deposit wallet, not the
     // shared custodial wallet the send feature actually spends from — left
     // there, it would just sit unreachable by the rest of the app. Sweep it
     // across immediately so it becomes part of the balance flash-sends draw
-    // from, the same on-chain transfer as the markup skim just above, only
-    // addressed to the custodial wallet instead of the profit address. Only
+    // from, the same on-chain transfer as the fee leg above, only addressed
+    // to the custodial wallet instead of the profit address. Only
     // meaningful when this deployment runs a custodial wallet at all —
     // skipped, not failed, on a buy-only deployment with no shared wallet.
     if (identity.kind === 'client' && creditedRaw > 0n && serverWallet.isCustodial()) {
