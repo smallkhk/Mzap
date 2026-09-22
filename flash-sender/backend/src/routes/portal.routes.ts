@@ -97,10 +97,15 @@ portalRouter.get('/networks', async (_req, res, next) => {
   }
 });
 
-/** The full catalog, so a portal client can see what already exists before adding a limit or a duplicate token. */
-portalRouter.get('/assets', async (_req, res, next) => {
+/**
+ * The shared catalog plus this one client's own private additions — so a
+ * portal client can see what already exists before adding a limit or a
+ * duplicate token. Never another client's private asset.
+ */
+portalRouter.get('/assets', async (req, res, next) => {
   try {
     const assets = await prisma.asset.findMany({
+      where: { OR: [{ clientId: null }, { clientId: req.client!.id }] },
       include: { network: true },
       orderBy: [{ sortOrder: 'asc' }, { symbol: 'asc' }],
     });

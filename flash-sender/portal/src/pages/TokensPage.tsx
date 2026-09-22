@@ -2,13 +2,13 @@ import React from 'react';
 import { api, ApiError, type Asset, type Network } from '../lib/api';
 
 /**
- * Adding a token to the shared catalog.
+ * Adding a token that's private to this key.
  *
- * This list is shared infrastructure, not a per-client setting — every
- * installation sees the same catalog. What stays per-client is *sending
- * access* to any given entry, which lives entirely on the Limits screen.
- * Adding a token here does not grant anyone, including this key, the
- * ability to send it.
+ * Unlike the shared catalog an admin curates, anything added here is
+ * visible and usable only by this API key — never another key, and never
+ * the admin dashboard's own Assets list. Adding one alone grants no
+ * ability to send it yet: sending access still lives entirely on the
+ * Limits screen, same as everything else in the catalog.
  */
 export function TokensPage() {
   const [assets, setAssets] = React.useState<Asset[]>([]);
@@ -16,6 +16,7 @@ export function TokensPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [adding, setAdding] = React.useState(false);
+  const [editing, setEditing] = React.useState<Asset | null>(null);
   const [justAdded, setJustAdded] = React.useState<Asset | null>(null);
 
   const load = React.useCallback(async () => {
@@ -38,14 +39,25 @@ export function TokensPage() {
     void load();
   }, [load]);
 
+  const removeToken = async (asset: Asset) => {
+    if (!confirm(`Remove ${asset.symbol}? This only removes your own private token — nothing shared.`)) return;
+    try {
+      await api.assets.remove(asset.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to remove the token.');
+    }
+  };
+
   return (
     <div className="page">
       <div className="page__header">
         <div>
           <h2>My tokens</h2>
           <p className="muted">
-            Every token every installation can see. Add one your administrator hasn't yet — then
-            grant yourself a limit for it under "My sending limits" to actually send it.
+            The shared catalog, plus tokens you've added yourself — those are private to your key
+            alone, never seen by anyone else. Add one, then grant yourself a limit for it under
+            "My sending limits" to actually send it.
           </p>
         </div>
         <button className="btn btn--primary" onClick={() => setAdding(true)}>
@@ -65,6 +77,7 @@ export function TokensPage() {
                 <th>Network</th>
                 <th>Contract</th>
                 <th>Decimals</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -72,6 +85,11 @@ export function TokensPage() {
                 <tr key={a.id}>
                   <td>
                     <strong>{a.symbol}</strong>
+                    {a.isMine && (
+                      <span className="chip" style={{ marginLeft: 8 }}>
+                        yours
+                      </span>
+                    )}
                   </td>
                   <td>{a.name}</td>
                   <td className="faint">{a.network.name}</td>
@@ -79,6 +97,18 @@ export function TokensPage() {
                     {a.isNative ? 'native coin' : `${a.contractAddress?.slice(0, 10)}…`}
                   </td>
                   <td className="faint">{a.decimals}</td>
+                  <td>
+                    {a.isMine && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn--sm" onClick={() => setEditing(a)}>
+                          Edit
+                        </button>
+                        <button className="btn btn--sm" onClick={() => void removeToken(a)}>
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -98,6 +128,17 @@ export function TokensPage() {
         />
       )}
 
+      {editing && (
+        <EditTokenForm
+          asset={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await load();
+          }}
+        />
+      )}
+
       {justAdded && (
         <div className="backdrop">
           <div className="modal" style={{ maxWidth: 440 }}>
@@ -106,8 +147,8 @@ export function TokensPage() {
             </header>
             <div className="modal__body">
               <div className="alert alert--info">
-                It's in the catalog, but nothing can send it yet — including you. Head to "My
-                sending limits" and grant yourself a limit for it.
+                It's private to your key now, but nothing can send it yet — including you. Head to
+                "My sending limits" and grant yourself a limit for it.
               </div>
             </div>
             <footer className="modal__foot">
@@ -260,6 +301,105 @@ function AddTokenForm({
             </button>
             <button className="btn btn--primary" type="submit" disabled={busy} style={{ flex: 1 }}>
               {busy ? 'Adding…' : 'Add token'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Editing never touches what identifies a token on-chain — its network and
+ * contract address are fixed at creation. Only the label and whether it's
+ * currently offered can change.
+ */
+function EditTokenForm({
+  asset,
+  onClose,
+  onSaved,
+}: {
+  asset: Asset;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [name, setName] = React.useState(asset.name);
+  const [symbol, setSymbol] = React.useState(asset.symbol);
+  const [decimals, setDecimals] = React.useState(String(asset.decimals));
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.assets.update(asset.id, { name, symbol, decimals: Number(decimals) });
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="backdrop">
+      <div className="modal" style={{ maxWidth: 520 }}>
+        <header className="modal__head">
+          <h3>Edit {asset.symbol}</h3>
+        </header>
+
+        <form className="modal__body" onSubmit={submit}>
+          {error && <div className="alert alert--danger">{error}</div>}
+
+          <div className="grid-2">
+            <label className="field">
+              <span>Symbol</span>
+              <input
+                className="input"
+                required
+                maxLength={16}
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Name</span>
+              <input
+                className="input"
+                required
+                maxLength={80}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <label className="field">
+            <span>Decimals</span>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={36}
+              required
+              value={decimals}
+              onChange={(e) => setDecimals(e.target.value)}
+            />
+          </label>
+
+          <p className="faint" style={{ margin: 0, fontSize: 12 }}>
+            Network and contract address ({asset.contractAddress}) can't be changed here — remove
+            the token and re-add it if you got either wrong.
+          </p>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn--primary" type="submit" disabled={busy} style={{ flex: 1 }}>
+              {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
         </form>

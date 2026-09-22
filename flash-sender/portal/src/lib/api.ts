@@ -159,6 +159,10 @@ export interface Asset {
   decimals: number;
   isNative: boolean;
   enabled: boolean;
+  /** True for anything not part of the shared, admin-curated catalog. */
+  isPrivate?: boolean;
+  /** True only when this private asset belongs to the signed-in key — the only ones it can edit or delete. */
+  isMine?: boolean;
 }
 
 export interface SpendingLimit {
@@ -176,7 +180,9 @@ export const api = {
   },
 
   assets: {
+    /** The shared catalog plus this key's own private additions — never another key's. */
     list: () => raw<{ assets: Asset[] }>('/api/portal/assets'),
+    /** Adds a token private to this key alone — nobody else, including other keys and the admin dashboard, ever sees it. */
     create: (data: {
       assetId: string;
       name: string;
@@ -186,11 +192,14 @@ export const api = {
       decimals: number;
       explorerUrl?: string;
       logoUrl?: string;
-    }) =>
-      raw<{ asset: Asset; configVersion: number }>('/api/portal/assets', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+    }) => raw<{ asset: Asset }>('/api/assets', { method: 'POST', body: JSON.stringify(data) }),
+    /** Edits one of this key's own private assets — its label and enabled state only, never its network or contract. */
+    update: (
+      assetId: string,
+      data: Partial<{ name: string; symbol: string; decimals: number; explorerUrl: string | null; logoUrl: string | null; enabled: boolean }>,
+    ) => raw<{ asset: Asset }>(`/api/assets/${encodeURIComponent(assetId)}`, { method: 'PUT', body: JSON.stringify(data) }),
+    /** Removes one of this key's own private assets. */
+    remove: (assetId: string) => raw<void>(`/api/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
   },
 
   limits: {

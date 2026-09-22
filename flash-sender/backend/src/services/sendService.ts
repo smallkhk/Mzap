@@ -136,8 +136,10 @@ export async function prepare(client: ApiClient, input: PrepareInput) {
 
   const from = wallet.address();
 
-  const asset = await prisma.asset.findUnique({
-    where: { assetId: input.assetId },
+  // The shared catalog, or this client's own private asset — never another
+  // client's, even if its assetId were guessed.
+  const asset = await prisma.asset.findFirst({
+    where: { assetId: input.assetId, OR: [{ clientId: null }, { clientId: client.id }] },
     include: { network: true },
   });
 

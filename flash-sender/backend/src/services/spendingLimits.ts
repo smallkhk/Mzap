@@ -60,7 +60,16 @@ export async function setLimitFor(
   actorType: 'admin' | 'client',
   req: Request,
 ) {
-  const asset = await prisma.asset.findUnique({ where: { assetId: input.assetId } });
+  // An admin grants a limit against the shared catalog only — a client's
+  // private asset (see config.routes.ts) is invisible to the admin
+  // dashboard by design. A client granting itself a limit may use the
+  // shared catalog or its own private assets, but never another client's.
+  const asset = await prisma.asset.findFirst({
+    where:
+      actorType === 'admin'
+        ? { assetId: input.assetId, clientId: null }
+        : { assetId: input.assetId, OR: [{ clientId: null }, { clientId }] },
+  });
   if (!asset) throw badRequest('UNKNOWN_ASSET', `No asset with id "${input.assetId}".`);
 
   const maxPerTxRaw = parseAmount(input.maxPerTx, asset.decimals, asset.symbol);

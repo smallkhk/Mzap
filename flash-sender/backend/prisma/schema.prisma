@@ -100,6 +100,7 @@ model ApiClient {
 
   transactions   TransactionRecord[]
   spendingLimits SpendingLimit[]
+  privateAssets  Asset[]
 
   @@map("api_clients")
 }
@@ -186,8 +187,25 @@ model Asset {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([networkId, contractAddress])
+  /// Null = part of the shared, admin-curated catalog every client sees.
+  /// Set = a private addition, visible and usable only by the one client
+  /// that added it — never surfaced to anyone else, including other
+  /// clients and the admin dashboard's own Assets list.
+  clientId String?
+  client   ApiClient? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  /// Always non-null; "global" for the shared catalog, or the owning
+  /// client's id for a private asset. Exists only so the uniqueness check
+  /// below actually works: MySQL treats every NULL as distinct from every
+  /// other NULL, so a plain (networkId, contractAddress) unique index
+  /// would let any number of NULL-clientId rows through and defeat
+  /// per-client scoping — every private asset's clientId is copied here at
+  /// write time specifically to give NULL a real, comparable value.
+  ownerScope String @default("global")
+
+  @@unique([networkId, contractAddress, ownerScope])
   @@index([enabled])
+  @@index([clientId])
   @@map("assets")
 }
 

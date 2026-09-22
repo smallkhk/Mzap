@@ -178,6 +178,30 @@ export const updateAssetSchema = assetBase
     );
   });
 
+/**
+ * What any API client (desktop app or portal) may submit to add a token
+ * that's private to them — same restricted shape as a portal addition to
+ * the shared catalog, but this one is never seen by anyone else. See
+ * `portalCreateAssetSchema` for why `isNative`/`enabled`/`sortOrder` are
+ * never accepted here either.
+ */
+export const clientCreateAssetSchema = portalCreateAssetSchema;
+
+/**
+ * Editing a client's own private asset never touches what identifies it
+ * on-chain — its network and contract address are fixed at creation, the
+ * same as the admin-curated catalog treats them as immutable in practice.
+ * Only the label and whether it's currently offered can change.
+ */
+export const clientUpdateAssetSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  symbol: z.string().min(1).max(16).optional(),
+  decimals: decimalsSchema.optional(),
+  explorerUrl: explorerUrlSchema.nullish(),
+  logoUrl: z.string().url().nullish(),
+  enabled: z.boolean().optional(),
+});
+
 export const assetQuerySchema = z.object({
   network: slugSchema.optional(),
   includeDisabled: z

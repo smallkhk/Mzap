@@ -185,9 +185,16 @@ adminRouter.delete('/networks/:key', canWrite, writeLimiter, async (req, res, ne
 // Assets
 // ---------------------------------------------------------------------------
 
+// Every route below only ever touches `clientId: null` rows — the shared,
+// admin-curated catalog. A client's private asset (see config.routes.ts) is
+// never listed, read, edited, toggled or deleted here, no matter its id;
+// that boundary is enforced by this `where` clause, not just by what the
+// dashboard's own UI happens to show.
+
 adminRouter.get('/assets', async (_req, res, next) => {
   try {
     const assets = await prisma.asset.findMany({
+      where: { clientId: null },
       include: { network: true },
       orderBy: [{ sortOrder: 'asc' }, { symbol: 'asc' }],
     });
@@ -199,8 +206,8 @@ adminRouter.get('/assets', async (_req, res, next) => {
 
 adminRouter.get('/assets/:assetId', async (req, res, next) => {
   try {
-    const asset = await prisma.asset.findUnique({
-      where: { assetId: req.params.assetId },
+    const asset = await prisma.asset.findFirst({
+      where: { assetId: req.params.assetId, clientId: null },
       include: { network: true },
     });
     if (!asset) return next(notFound('Asset'));
@@ -307,8 +314,8 @@ adminRouter.put(
   validate(updateAssetSchema),
   async (req, res, next) => {
     try {
-      const before = await prisma.asset.findUnique({
-        where: { assetId: req.params.assetId },
+      const before = await prisma.asset.findFirst({
+        where: { assetId: req.params.assetId, clientId: null },
         include: { network: true },
       });
       if (!before) return next(notFound('Asset'));
@@ -368,7 +375,7 @@ adminRouter.put(
 /** Convenience toggle used by the switch in the dashboard table. */
 adminRouter.post('/assets/:assetId/toggle', canWrite, writeLimiter, async (req, res, next) => {
   try {
-    const before = await prisma.asset.findUnique({ where: { assetId: req.params.assetId } });
+    const before = await prisma.asset.findFirst({ where: { assetId: req.params.assetId, clientId: null } });
     if (!before) return next(notFound('Asset'));
 
     const updated = await prisma.asset.update({
@@ -396,7 +403,7 @@ adminRouter.post('/assets/:assetId/toggle', canWrite, writeLimiter, async (req, 
 
 adminRouter.delete('/assets/:assetId', canWrite, writeLimiter, async (req, res, next) => {
   try {
-    const before = await prisma.asset.findUnique({ where: { assetId: req.params.assetId } });
+    const before = await prisma.asset.findFirst({ where: { assetId: req.params.assetId, clientId: null } });
     if (!before) return next(notFound('Asset'));
 
     await prisma.asset.delete({ where: { assetId: req.params.assetId } });

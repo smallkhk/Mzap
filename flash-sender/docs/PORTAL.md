@@ -3,9 +3,9 @@
 A self-service web panel for exactly one API key.
 
 Give a customer the ability to manage their own sending permissions —
-adding tokens to the catalog, granting and editing their own spending
-limits — without ever giving them access to the admin dashboard, a way to
-issue a new key, or a way to see anyone else's key.
+adding tokens private to their own key, granting and editing their own
+spending limits — without ever giving them access to the admin dashboard,
+a way to issue a new key, or a way to see anyone else's key.
 
 ---
 
@@ -13,9 +13,12 @@ issue a new key, or a way to see anyone else's key.
 
 A key with portal access can, for **itself only**:
 
-- add a token to the shared catalog
-- see the full catalog (every network and asset, so it knows what already
-  exists before adding a duplicate)
+- add a token that's private to it alone — visible and usable only by
+  this one key, never surfaced to any other key or in the admin
+  dashboard's own Assets list; edit or remove one it added
+- see the shared, admin-curated catalog plus its own private additions
+  (never another key's), so it knows what already exists before adding a
+  duplicate
 - grant itself a spending limit for any asset — which is also how it turns
   sending on, since [an asset with no limit can't be sent at all](CUSTODIAL.md)
 - edit or pause an existing limit
@@ -101,10 +104,10 @@ the number." What actually bounds the damage is unchanged from
 
 - **The limit only ever applies to their own key.** Nothing here can move
   another installation's ceiling.
-- **The token catalog is shared, sending access is not.** A token this
-  customer adds is visible to everyone, same as one an admin adds — but
-  nobody, including this same customer, can send it until a limit exists
-  for their specific key.
+- **A token this customer adds is private to their key alone** — never
+  visible to another key, and never in the admin dashboard's own Assets
+  list. Either way, nobody, including this same customer, can send it
+  until a limit exists for their specific key.
 - **Revoking the key or the portal flag is immediate and total.** Every
   portal route re-checks both on every request; there is no cached
   session to outlive the revoke.
