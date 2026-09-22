@@ -532,53 +532,6 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
   try {
     const tokenBefore = await chain.getTokenBalance(network, quote.tokenAddress, fromAddress);
 
-    // The fee, when one applies, is taken from the spend asset itself —
-    // before the swap, not skimmed from what the swap returns — so it has
-    // to move first, while the wallet's spend-asset balance still covers it.
-    let feeTxHash: string | null = null;
-    if (quote.feeRaw > 0n && quote.profitAddress) {
-      feeTxHash = await withChainLock(network.chainId, () =>
-        withSigner(identity, async (privateKey) => {
-          const feeRequest = quote.spendIsNative
-            ? { to: getAddress(quote.profitAddress!), data: '0x', value: quote.feeRaw }
-            : {
-                to: getAddress(quote.spendContractAddress!),
-                data: new Contract(quote.spendContractAddress!, [
-                  'function transfer(address to, uint256 amount) returns (bool)',
-                ]).interface.encodeFunctionData('transfer', [quote.profitAddress, quote.feeRaw]),
-                value: 0n,
-              };
-          const fee = await chain.estimateFee(network, feeRequest, fromAddress);
-          const nonce = await chain.getPendingNonce(network, fromAddress);
-
-          const response = await chain.signAndBroadcast(network, privateKey, {
-            ...feeRequest,
-            nonce,
-            gasLimit: fee.gasLimit,
-            ...(fee.maxFeePerGas
-              ? { maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n }
-              : { gasPrice: fee.gasPrice ?? 0n }),
-          });
-          await waitForReceipt(network, response.hash);
-          return response.hash;
-        }),
-      );
-
-      await recordAudit({
-        actorType: 'system',
-        action: 'buy.fee',
-        entity: 'TransactionRecord',
-        entityId: record.id,
-        after: {
-          clientId: identity.kind === 'client' ? identity.client.id : null,
-          spendAssetId: quote.spendAssetId,
-          feeRaw: quote.feeRaw.toString(),
-          feeTxHash,
-          profitAddress: quote.profitAddress,
-        },
-      });
-    }
-
     // Estimated and signed with the same rigor as a plain send: gas is
     // re-estimated fresh right before signing (with the same 20% headroom
     // `chain.estimateFee` applies everywhere else) rather than trusting the
@@ -662,6 +615,57 @@ export async function confirmBuy(identity: BuyIdentity, quoteRef: string) {
     // credited exactly what the swap actually returned.
     const actualReceived = tokenAfter - tokenBefore;
     const creditedRaw = actualReceived;
+
+    // The fee, when one applies, is taken from the spend asset itself — but
+    // only now, after the swap has actually delivered the token. Moving it
+    // before the swap would risk taking a customer's money for a purchase
+    // that then reverted or failed: the swap already consumed exactly
+    // swapAmountRaw from the wallet via its own approval, never touching
+    // this portion, so there is nothing to reconcile — it simply wasn't
+    // spent until this point.
+    let feeTxHash: string | null = null;
+    if (actualReceived > 0n && quote.feeRaw > 0n && quote.profitAddress) {
+      feeTxHash = await withChainLock(network.chainId, () =>
+        withSigner(identity, async (privateKey) => {
+          const feeRequest = quote.spendIsNative
+            ? { to: getAddress(quote.profitAddress!), data: '0x', value: quote.feeRaw }
+            : {
+                to: getAddress(quote.spendContractAddress!),
+                data: new Contract(quote.spendContractAddress!, [
+                  'function transfer(address to, uint256 amount) returns (bool)',
+                ]).interface.encodeFunctionData('transfer', [quote.profitAddress, quote.feeRaw]),
+                value: 0n,
+              };
+          const fee = await chain.estimateFee(network, feeRequest, fromAddress);
+          const nonce = await chain.getPendingNonce(network, fromAddress);
+
+          const response = await chain.signAndBroadcast(network, privateKey, {
+            ...feeRequest,
+            nonce,
+            gasLimit: fee.gasLimit,
+            ...(fee.maxFeePerGas
+              ? { maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n }
+              : { gasPrice: fee.gasPrice ?? 0n }),
+          });
+          await waitForReceipt(network, response.hash);
+          return response.hash;
+        }),
+      );
+
+      await recordAudit({
+        actorType: 'system',
+        action: 'buy.fee',
+        entity: 'TransactionRecord',
+        entityId: record.id,
+        after: {
+          clientId: identity.kind === 'client' ? identity.client.id : null,
+          spendAssetId: quote.spendAssetId,
+          feeRaw: quote.feeRaw.toString(),
+          feeTxHash,
+          profitAddress: quote.profitAddress,
+        },
+      });
+    }
 
     // A customer's purchase lands in their own deposit wallet, not the
     // shared custodial wallet the send feature actually spends from — left

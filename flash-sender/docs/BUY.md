@@ -27,22 +27,23 @@ Same two-phase shape as sending, for the same reason:
 prepare (quote)                              execute (confirm)
   │                                             │
   ├─ verify the token is a real contract        ├─ re-verify chain id
-  │  (decimals(), symbol() read live —          ├─ (customer buys only) send
-  │   never trusted from the pasted address)    │  the fee, straight from the
-  ├─ check the spending wallet's real balance    │  spend asset, to the
-  ├─ (customer buys only) take the markup        │  profit address
-  │  off the spend amount — this is what's       ├─ approve LI.FI's named
-  │  actually swapped, not the full amount       │  contract, if the spend
-  ├─ ask LI.FI for *every* route it can find      │  asset is a token
-  │  (Fly, 1inch, Nordstern, whichever on-chain   ├─ sign and broadcast LI.FI's
-  │  DEX has liquidity) and pick whichever         │  own transactionRequest —
-  │  actually returns the most, plus a second,    │  never hand-built calldata
-  │  independent 1inch quote, in parallel         ├─ read the token balance
-  ├─ turn the winning route into an already-       │  before/after to find the
-  │  ready transaction via LI.FI, store it with   │  *actual* amount received —
-  │  an extra 1% slippage floor, by an opaque id   │  credited in full, nothing
-  └─ show the comparison + what the buyer          │  skimmed a second time
-     will actually receive                        └─ (customer buys only) sweep
+  │  (decimals(), symbol() read live —          ├─ approve LI.FI's named
+  │   never trusted from the pasted address)    │  contract, if the spend
+  ├─ check the spending wallet's real balance    │  asset is a token
+  ├─ (customer buys only) take the markup        ├─ sign and broadcast LI.FI's
+  │  off the spend amount — this is what's       │  own transactionRequest —
+  │  actually swapped, not the full amount       │  never hand-built calldata
+  ├─ ask LI.FI for *every* route it can find      ├─ read the token balance
+  │  (Fly, 1inch, Nordstern, whichever on-chain   │  before/after to find the
+  │  DEX has liquidity) and pick whichever         │  *actual* amount received —
+  │  actually returns the most, plus a second,    │  credited in full, nothing
+  │  independent 1inch quote, in parallel         │  skimmed a second time
+  ├─ turn the winning route into an already-       ├─ only once that succeeds:
+  │  ready transaction via LI.FI, store it with   │  (customer buys only) send
+  │  an extra 1% slippage floor, by an opaque id   │  the fee, straight from the
+  └─ show the comparison + what the buyer          │  spend asset, to the
+     will actually receive                        │  profit address
+                                                    └─ (customer buys only) sweep
                                                       it to the custodial wallet
 ```
 
@@ -156,13 +157,21 @@ converts to `round((1 - 1/M) × 10000)` basis points. A markup with **no** profi
 address does nothing: there is deliberately no fallback destination, so a
 buy can never skim funds to nowhere. Set both together, or neither.
 
-**The fee is taken from the spend asset, before the swap runs — not from the
-token that comes back.** A 2.5% markup on a 1 USDT buy sends 0.025 USDT to
-the profit address and swaps the remaining 0.975 USDT; the customer is
-credited 100% of whatever that swap actually returns, none of it skimmed
-afterward. The split is computed once, at quote time, and locked into that
-quote — `confirm` moves exactly the fee and swaps exactly the amount that
-was shown, never a live re-read of the current settings.
+**The fee is computed against the spend asset, before the swap — not the
+token that comes back.** A 2.5% markup on a 1 USDT buy swaps 0.975 USDT and
+sends 0.025 USDT to the profit address; the customer is credited 100% of
+whatever that swap actually returns, none of it skimmed afterward. The
+split is computed once, at quote time, and locked into that quote —
+`confirm` swaps exactly the amount that was shown and never re-reads the
+current settings.
+
+The fee itself only actually moves **after** the swap has delivered the
+token, never before. The swap only ever spends the post-fee amount — it
+never touches the fee portion — so nothing stops the fee from waiting; but
+moving it first would mean a customer could lose that money to a swap that
+then reverted or failed for any reason, and get nothing for it. If the
+swap fails, execution never reaches the fee transfer at all: nothing moves,
+the fee included.
 
 The portal's quote screen deliberately never shows this split. The
 customer sees the one amount they typed and what they'll receive for it —
