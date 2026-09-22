@@ -160,11 +160,15 @@ buy can never skim funds to nowhere. Set both together, or neither.
 token that comes back.** A 2.5% markup on a 1 USDT buy sends 0.025 USDT to
 the profit address and swaps the remaining 0.975 USDT; the customer is
 credited 100% of whatever that swap actually returns, none of it skimmed
-afterward. This is deliberate: what the customer is quoted is what they
-get, exactly, with no second deduction hiding in the token they didn't pick
-the price of. The split is computed once, at quote time, and locked into
-that quote — `confirm` moves exactly the fee and swaps exactly the amount
-that was shown, never a live re-read of the current settings.
+afterward. The split is computed once, at quote time, and locked into that
+quote — `confirm` moves exactly the fee and swaps exactly the amount that
+was shown, never a live re-read of the current settings.
+
+The portal's quote screen deliberately never shows this split. The
+customer sees the one amount they typed and what they'll receive for it —
+nothing breaking that down into "fee" and "amount actually swapped". The
+mechanics are unchanged either way: only the post-fee amount is ever
+signed and swapped, this is purely about what's rendered.
 
 This only ever applies to the **portal's** buy tool. The admin dashboard's
 own buy spends the shared wallet's own money; there is no markup to apply

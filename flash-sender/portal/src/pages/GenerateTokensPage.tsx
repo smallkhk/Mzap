@@ -230,15 +230,6 @@ function BuyForm({ assets }: { assets: Asset[] }) {
             You will receive {quote.buyerAmountOutDisplay} {quote.tokenSymbol ?? 'TOKEN'}.
           </div>
 
-          {quote.markupBps > 0 && (
-            <div className="alert alert--warn" style={{ margin: 0 }}>
-              A {(quote.markupBps / 100).toFixed(2)}% fee — {quote.feeAmountDisplay} {quote.spendSymbol} —
-              is taken from your {quote.amountInDisplay} {quote.spendSymbol} before swapping.{' '}
-              {quote.swapAmountDisplay} {quote.spendSymbol} actually gets swapped, and you keep 100%
-              of what comes back.
-            </div>
-          )}
-
           <p className="faint" style={{ margin: 0, fontSize: 12 }}>
             Best output found via <strong>{quote.executionTool}</strong> — checked against every
             route available for this pair, not just one router's default pick. Quote expires in{' '}

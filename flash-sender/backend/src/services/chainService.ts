@@ -256,6 +256,42 @@ export interface FeeEstimate {
  * before anything is signed — rather than as a failed on-chain transaction
  * that still costs gas.
  */
+/**
+ * Turns a raw provider/ethers error into the same friendly AppError shape,
+ * regardless of which call threw it. `estimateGas` and `sendTransaction`
+ * both perform their own client-side balance/revert checks and both throw
+ * ugly, RPC-flavoured text ("insufficient funds for intrinsic transaction
+ * cost", full calldata included) — never something safe to show a
+ * customer. This is the one place that text gets translated, so neither
+ * caller can accidentally let it through unwrapped.
+ */
+function translateProviderError(err: unknown, network: Network): AppError {
+  const message =
+    (err as { shortMessage?: string; message?: string })?.shortMessage ??
+    (err as Error)?.message ??
+    '';
+
+  if (/insufficient funds/i.test(message)) {
+    return new AppError(
+      400,
+      'INSUFFICIENT_NATIVE_FOR_GAS',
+      `The sending wallet does not hold enough ${network.nativeSymbol} to pay the network fee.`,
+    );
+  }
+  if (/transfer amount exceeds balance/i.test(message)) {
+    return new AppError(
+      400,
+      'INSUFFICIENT_TOKEN_BALANCE',
+      'The token contract rejected the transfer: the wallet does not hold that much.',
+    );
+  }
+  return new AppError(
+    400,
+    'EXECUTION_REVERTED',
+    `The transaction would fail: ${message.slice(0, 200) || 'the contract reverted.'}`,
+  );
+}
+
 export async function estimateFee(
   network: Network,
   request: TransactionRequest,
@@ -267,28 +303,7 @@ export async function estimateFee(
   try {
     gasLimit = await provider.estimateGas({ ...request, from: getAddress(from) });
   } catch (err) {
-    const message = (err as { shortMessage?: string; message?: string })?.shortMessage ??
-      (err as Error)?.message ?? '';
-
-    if (/insufficient funds/i.test(message)) {
-      throw new AppError(
-        400,
-        'INSUFFICIENT_NATIVE_FOR_GAS',
-        `The sending wallet does not hold enough ${network.nativeSymbol} to pay the network fee.`,
-      );
-    }
-    if (/transfer amount exceeds balance/i.test(message)) {
-      throw new AppError(
-        400,
-        'INSUFFICIENT_TOKEN_BALANCE',
-        'The token contract rejected the transfer: the wallet does not hold that much.',
-      );
-    }
-    throw new AppError(
-      400,
-      'EXECUTION_REVERTED',
-      `The transaction would fail: ${message.slice(0, 200) || 'the contract reverted.'}`,
-    );
+    throw translateProviderError(err, network);
   }
 
   // 20% headroom absorbs state drift between estimation and inclusion.
@@ -341,9 +356,14 @@ export async function signAndBroadcast(
 ): Promise<TransactionResponse> {
   const wallet = new Wallet(privateKey, getProvider(network));
 
-  // EIP-155: the chain id is part of the signed payload, so a signature for
-  // one chain cannot be replayed on another.
-  return wallet.sendTransaction({ ...request, chainId: network.chainId });
+  try {
+    // EIP-155: the chain id is part of the signed payload, so a signature for
+    // one chain cannot be replayed on another.
+    return await wallet.sendTransaction({ ...request, chainId: network.chainId });
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw translateProviderError(err, network);
+  }
 }
 
 export async function getReceipt(
