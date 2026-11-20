@@ -1,102 +1,77 @@
 # Building the iOS app
 
-Produces an unsigned-for-nobody, properly-signed `.ipa` via GitHub Actions
-(`.github/workflows/build-ios.yml`), on a macOS runner. No local Mac or Xcode
-needed to trigger a build — but Apple still requires a real, paid Apple
-Developer account ($99/year) before any IPA can be signed, by anyone, on any
-machine. That part cannot be skipped or worked around.
+`.github/workflows/build-ios.yml` builds an **unsigned** `.ipa` on a macOS
+GitHub Actions runner — no Apple secrets, no certificate, no provisioning
+profile. It compiles `mobile/` into an app bundle and zips it into IPA shape.
+You sign it yourself afterward with your own Apple Developer account, which
+is the part Apple requires a human (and a paid membership) for regardless of
+which machine does the compiling.
 
 ---
 
-## What you need, once
-
-1. **An Apple Developer account** (apps.apple.com/account) — personal or
-   organization, either works for ad-hoc distribution.
-2. **A Distribution certificate** (`.p12`) and its password.
-3. **A provisioning profile** matching the app's bundle ID
-   (`com.flashsenderbynora.app`, set in `mobile/app.json`) and the devices you
-   want able to install it (ad-hoc profiles list specific device UDIDs).
-4. **Your Team ID** — found on
-   [developer.apple.com/account](https://developer.apple.com/account) under
-   Membership.
-
-### Generating the certificate and profile
-
-On a Mac, in Xcode:
-
-1. Xcode → Settings → Accounts → add your Apple ID → Manage Certificates →
-   **+** → **Apple Distribution**.
-2. Export it: Keychain Access → find the new certificate → right-click →
-   **Export** → save as `cert.p12`, set a password (you'll need this
-   password again as a secret).
-3. On developer.apple.com → Certificates, Identifiers & Profiles → Profiles →
-   **+** → **Ad Hoc** (for direct install on devices you register) or
-   **App Store** (for TestFlight/App Store) → select the Distribution
-   certificate from step 1 → select the registered devices (ad-hoc only) →
-   download as `profile.mobileprovision`.
-4. Register the devices that should be able to install an ad-hoc build under
-   Devices, by UDID, **before** creating the profile — a profile only covers
-   devices that existed when it was generated.
-
-No Mac available? Apple's enrollment and certificate/profile creation all run
-through the developer.apple.com web portal and work from any browser — Xcode
-is only needed to *generate* the `.p12` locally; everything else is web-based.
-If you truly have no Mac at all, ask whoever will test the app to generate the
-certificate once from their own Mac and hand you the `.p12` — the private key
-only needs to exist somewhere once, not on every machine that builds.
-
----
-
-## Repository secrets
-
-Set these at **GitHub → Settings → Secrets and variables → Actions**:
-
-| Secret | Value |
-|---|---|
-| `APPLE_CERT_BASE64` | `base64 -i cert.p12 \| pbcopy` (or `base64 -w0 cert.p12` on Linux), then paste |
-| `APPLE_CERT_PASSWORD` | The password you set exporting the `.p12` |
-| `APPLE_PROVISIONING_PROFILE_BASE64` | `base64 -i profile.mobileprovision \| pbcopy` |
-| `APPLE_PROVISIONING_PROFILE_NAME` | The profile's **Name** field, exactly as shown on developer.apple.com (not the filename) |
-| `APPLE_TEAM_ID` | Your 10-character Team ID |
-| `APPLE_KEYCHAIN_PASSWORD` | Any throwaway string — only used to lock/unlock a keychain that exists for the duration of one build |
-
-**Never commit any of these values** or put them in a file that ships with
-the app. The `.p12` and `.mobileprovision` files themselves should never
-enter git history either — only their base64 copies, as GitHub secrets.
-
----
-
-## Running the build
+## Getting the unsigned IPA
 
 - **Automatically**: push a commit to `claude/flash-sender-windows-app-zu3zmm`,
-  or push a tag like `v1.0.1` to also attach the IPA to a GitHub Release.
+  or push a tag like `v1.0.1` to also attach it to a GitHub Release.
 - **Manually**: GitHub → Actions → "Build iOS app" → Run workflow.
 
-Output: download the `flash-sender-ios-ipa` artifact from the run, or (for a
-tag push) grab it from the Release page directly.
+Output: the `flash-sender-ios-ipa-unsigned` artifact on the run, or the
+Release page for a tag push. The file is named
+`FlashSenderByNora-unsigned.ipa`.
 
 ---
 
-## Installing an ad-hoc IPA on a device
+## Signing it yourself
 
-Apple doesn't allow a plain "download and tap to install" for ad-hoc builds
-the way Android's APKs work. Options, easiest first:
+Pick whichever of these you already have set up:
 
-1. **Install via a Mac + Xcode**: Window → Devices and Simulators → drag the
-   `.ipa` onto the connected device.
-2. **Install via Apple Configurator 2** (Mac App Store, free): drag the
-   `.ipa` onto the device.
-3. **Over-the-air** via a hosting page (e.g.
-   [diawi.com](https://diawi.com) or your own HTTPS server) with a
-   `manifest.plist` — more setup, but installs by just opening a link on the
-   device, no cable needed.
+### Option A — Xcode re-sign (simplest, needs a Mac)
 
-For wider, cable-free distribution without re-signing for every new device,
-switch `method` in `.github/workflows/build-ios.yml`'s `ExportOptions.plist`
-step from `ad-hoc` to `app-store` and submit through
-[App Store Connect](https://appstoreconnect.apple.com) (TestFlight for
-testers, or a full App Store release) — that needs an `app-store` profile
-instead of an ad-hoc one, same secrets otherwise.
+1. Unzip the IPA: `unzip FlashSenderByNora-unsigned.ipa -d unsigned`.
+2. Open Xcode → Window → Devices and Simulators → select your device →
+   drag `unsigned/Payload/*.app` onto it. Xcode will offer to sign it with
+   whatever team/identity is selected in your Xcode account settings and
+   install it directly — no manual `codesign` needed for this path.
+
+### Option B — `codesign` + manual provisioning profile
+
+```bash
+unzip FlashSenderByNora-unsigned.ipa -d unsigned
+cp YourProfile.mobileprovision "unsigned/Payload/Flash Sender by Nora.app/embedded.mobileprovision"
+codesign --force --sign "Apple Distribution: Your Name (TEAMID)" \
+  --entitlements entitlements.plist \
+  "unsigned/Payload/Flash Sender by Nora.app"
+cd unsigned && zip -r -X ../FlashSenderByNora-signed.ipa Payload
+```
+
+`entitlements.plist` needs to match what the profile grants — easiest way to
+get a correct one is extracting it from the profile itself:
+
+```bash
+security cms -D -i YourProfile.mobileprovision > profile.plist
+/usr/libexec/PlistBuddy -x -c "Print :Entitlements" profile.plist > entitlements.plist
+```
+
+### Option C — Apple Configurator 2 / fastlane / a resigning GUI
+
+Tools like `fastlane sigh` + `fastlane resign` or third-party apps (e.g.
+iResign) take an unsigned or wrongly-signed IPA plus your `.p12` and
+provisioning profile and do the above for you.
+
+Once signed, install via Xcode's Devices window, Apple Configurator 2, or
+an ad-hoc OTA page, same as any other IPA.
+
+---
+
+## If you'd rather CI sign it too
+
+The workflow used to do exactly that — import a `.p12` and provisioning
+profile from repo secrets and run `xcodebuild -exportArchive`. If you want
+that back (so every CI build is already signed and installable with no
+local step), say so and it'll be restored; it needs these repo secrets:
+`APPLE_CERT_BASE64`, `APPLE_CERT_PASSWORD`,
+`APPLE_PROVISIONING_PROFILE_BASE64`, `APPLE_PROVISIONING_PROFILE_NAME`,
+`APPLE_TEAM_ID`, `APPLE_KEYCHAIN_PASSWORD`.
 
 ---
 
@@ -104,8 +79,6 @@ instead of an ad-hoc one, same secrets otherwise.
 
 | Symptom | Cause and fix |
 |---|---|
-| `No signing certificate "Apple Distribution" found` | The cert imported into the CI keychain doesn't match `CODE_SIGN_IDENTITY` in the workflow, or `APPLE_CERT_PASSWORD` is wrong. Re-export the `.p12` and re-check the password. |
-| `Provisioning profile "X" doesn't match the bundle identifier` | The profile's App ID doesn't cover `com.flashsenderbynora.app` — regenerate the profile from an App ID that does, or change the bundle identifier in `mobile/app.json` to match an existing profile (then also update `ExportOptions.plist`'s `provisioningProfiles` key). |
-| `doesn't include the currently selected device` | The device's UDID wasn't registered before the ad-hoc profile was generated. Register it on developer.apple.com, regenerate the profile, update the secret. |
-| Build succeeds but `.ipa` won't install — "Unable to install" on device | Usually an expired provisioning profile (they expire yearly) or a device not covered by it. Check the profile's expiry on developer.apple.com. |
-| `expo prebuild` fails or produces something unexpected | The `ios/` directory is regenerated fresh every run (Continuous Native Generation) from `mobile/app.json` — it is never committed. Check `app.json` first, not any local `ios/` folder, which this workflow never reads from your machine. |
+| `No .app found in the archive` | The `xcodebuild archive` step didn't actually produce a build — check the step's own log above it for the real compile error; this is just a sanity check that fires afterward. |
+| Signed IPA won't install — "Unable to install" | Usually the provisioning profile doesn't cover that device's UDID (register it on developer.apple.com and regenerate the profile), or the profile has expired. |
+| `expo prebuild` output looks wrong | The `ios/` directory is regenerated fresh every run (Continuous Native Generation) from `mobile/app.json` — it is never committed. Check `app.json`, not any local `ios/` folder; this workflow never reads your machine's copy. |
