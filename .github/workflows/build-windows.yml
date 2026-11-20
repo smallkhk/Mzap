@@ -9,14 +9,23 @@
 #
 # Pushing a tag like v1.0.0 also builds and attaches the installer to a
 # GitHub Release.
+#
+# Also runs automatically on every push to the dev branch below. This repo's
+# "default branch" (required for the Actions tab's manual "Run workflow"
+# button to list this workflow at all) points at an unrelated project, not
+# this one — the push trigger is what makes this workflow runnable without
+# needing that changed. Once a run exists, GitHub also starts listing this
+# workflow for manual dispatch going forward.
 
 name: Build Windows installer
 
 on:
-  workflow_dispatch: # manual trigger — the usual way to use this
+  workflow_dispatch: # manual trigger — works once at least one run exists
   push:
     tags:
       - 'v*'
+    branches:
+      - claude/flash-sender-windows-app-zu3zmm
 
 # Needed so the tag-triggered run can attach the installer to a Release.
 # Repositories default the workflow token to read-only.
