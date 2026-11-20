@@ -48,6 +48,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Flash Sender by Nora
+  # Shown as a mandatory "I Agree" page before install proceeds — states who
+  # owns this software and warns against paying anyone else for it.
+  license: build/owner-notice.txt
   # The wallet vault lives in %APPDATA% and must survive an uninstall unless
   # the user explicitly clears it — deleting it would destroy their key.
   deleteAppDataOnUninstall: false

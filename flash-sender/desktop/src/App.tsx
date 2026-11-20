@@ -6,6 +6,8 @@ import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { WalletGate } from './pages/WalletGate';
 import { Alert, Button } from './components/ui';
+import { SupportFooter } from './components/Support';
+import { OWNER, WHATSAPP_URL } from '../shared/branding';
 
 type Page = 'send' | 'history' | 'settings';
 
@@ -80,6 +82,7 @@ export function App() {
         <div className="empty" style={{ marginTop: '25vh' }}>
           <span className="spinner" style={{ width: 22, height: 22 }} aria-hidden />
         </div>
+        <SupportFooter compact />
       </div>
     );
   }
@@ -181,6 +184,13 @@ export function App() {
                 Settings
               </button>{' '}
               and enter your API address and key to continue.
+              <div style={{ marginTop: 'var(--space-2)' }}>
+                Don't have an API key?{' '}
+                <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="link">
+                  Request one from {OWNER.name} on WhatsApp
+                </a>
+                .
+              </div>
             </Alert>
           </div>
         ) : !walletReady ? (
@@ -196,6 +206,8 @@ export function App() {
           <HistoryPage />
         )}
       </main>
+
+      <SupportFooter />
     </div>
   );
 }

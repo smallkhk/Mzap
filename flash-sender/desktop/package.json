@@ -5,7 +5,8 @@
   "private": true,
   "description": "Send configured cryptocurrency coins and tokens on EVM networks.",
   "author": {
-    "name": "Nora"
+    "name": "Nora",
+    "email": "brightkteam92@gmail.com"
   },
   "license": "UNLICENSED",
   "main": "dist-electron/main.js",

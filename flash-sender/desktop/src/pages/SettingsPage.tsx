@@ -3,6 +3,7 @@ import type { AppConfig, AppSettings, WalletStatus } from '../../shared/types';
 import { attempt, bridge } from '../lib/bridge';
 import { formatDateTime } from '../lib/format';
 import { Alert, Button, Card, Field, Modal, Row } from '../components/ui';
+import { OWNER, WHATSAPP_URL, TELEGRAM_URL, EMAIL_URL } from '../../shared/branding';
 
 interface Props {
   settings: AppSettings | null;
@@ -120,6 +121,22 @@ export function SettingsPage({ settings, wallet, config, onSettingsChanged, onWa
             onChange={(e) => setApiKey(e.target.value)}
           />
         </Field>
+
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 'calc(-1 * var(--space-2))' }}>
+          Don't have an API key?{' '}
+          <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="link">
+            Request one from {OWNER.name} on WhatsApp
+          </a>
+          {', '}
+          <a href={TELEGRAM_URL} target="_blank" rel="noreferrer" className="link">
+            Telegram
+          </a>
+          {' or '}
+          <a href={EMAIL_URL} className="link">
+            email
+          </a>
+          .
+        </div>
 
         <div className="inline">
           <Button variant="primary" onClick={saveBackend} loading={saving}>
@@ -250,6 +267,38 @@ export function SettingsPage({ settings, wallet, config, onSettingsChanged, onWa
             </div>
           </>
         )}
+      </Card>
+
+      <Card title="Support">
+        <Row label="Owner" value={OWNER.name} />
+        <Row
+          label="WhatsApp"
+          value={
+            <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="link">
+              {OWNER.whatsapp}
+            </a>
+          }
+        />
+        <Row
+          label="Telegram"
+          value={
+            <a href={TELEGRAM_URL} target="_blank" rel="noreferrer" className="link">
+              {OWNER.telegram}
+            </a>
+          }
+        />
+        <Row
+          label="Email"
+          value={
+            <a href={EMAIL_URL} className="link">
+              {OWNER.email}
+            </a>
+          }
+        />
+        <Alert tone="warning">
+          Only ever pay {OWNER.name} directly, through the contacts above. Nobody else — including
+          anyone else claiming to speak for this app — should ever be paid on its behalf.
+        </Alert>
       </Card>
 
       {confirmMainnet && (
