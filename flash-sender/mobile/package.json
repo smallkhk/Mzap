@@ -1,0 +1,27 @@
+{
+  "name": "flash-sender-mobile",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "main": "index.ts",
+  "dependencies": {
+    "expo": "~53.0.0",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "0.79.5"
+  },
+  "overrides": {
+    "@babel/parser": "7.29.14",
+    "@babel/plugin-transform-block-scoping": "7.29.14"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.10",
+    "typescript": "~5.8.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "private": true
+}
